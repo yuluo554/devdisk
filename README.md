@@ -12,8 +12,10 @@
 - 永不 `rm -rf`：清理 = 移动到 `.trash/<batch-id>/`，`undo` 逐字节恢复
 - `.git` 只读：只统计体积与对象数，最多建议 `git gc`，从不执行
 
-**状态**：v0.1.0 · M0 骨架（CLI 契约与工程骨架就绪，五个子命令将在 M1–M5 逐个落地）。
-当前骨架期子命令返回退出码 `3`（未就绪），退役表见 `plan/05-里程碑与发布.md` §三。
+**状态**：v0.1.0 · M1 数据先行 + 扫描（合成树生成器 + 植入真值 + `scan` 已落地）。
+`scan` 当前只产出**扫描事实**（类型 / 体积 / mtime / 项目根 / 跳过原因）；
+`grade` / `reason` / `evidence` 三项在 M2 落地前恒为 `null` / `null` / `[]`。
+`audit` / `clean` / `undo` / `report` 仍返回退出码 `3`（未就绪），退役表见 `plan/05-里程碑与发布.md` §三。
 
 ## 定位与边界（如实说明）
 
@@ -46,7 +48,7 @@ pip install -e ".[dev]"
 devdisk --version
 devdisk --help
 
-# 扫描并分级（M1/M2 落地后可用）
+# 扫描（M1 起可用；当前只出扫描事实，分级在 M2 落地）
 devdisk scan ~/code --out devdisk-out/scan.json
 
 # 只读审计 Docker 与 .git（M3 落地后可用）
@@ -68,7 +70,7 @@ devdisk undo 20261018-120000-a1b2c3
 
 | 命令 | 作用 | 关键参数 |
 |---|---|---|
-| `devdisk scan <root>...` | 扫描 + 分级，输出候选清单 | `--out`、`--format json/csv`、`--min-bytes`、`--keep`、`--config` |
+| `devdisk scan <root>...` | 扫描（M1 起；分级在 M2 落地） | `--out`、`--format json/csv`、`--min-bytes`、`--keep`、`--config` |
 | `devdisk audit` | Docker / `.git` 只读审计 | `--root`（可重复）、`--docker`、`--git`、`--out` |
 | `devdisk clean` | 选中项移入隔离区 | `--from`、`--select`（可重复）、`--apply`、`--yes`、`--trash` |
 | `devdisk undo <batch-id>` | 按 manifest 逆序移回 | `--trash`、`--yes` |
@@ -101,6 +103,28 @@ devdisk undo 20261018-120000-a1b2c3
 
 只读取路径、体积、mtime 与白名单元数据文件（`.gitignore`、包清单）。不读取源码或文档正文，不上传任何数据，无网络请求。
 真实审计结果、隔离区、HTML 报告产物一律不入 git（见 `.gitignore`）。
+
+## 数据与合成树（M1 起）
+
+`scan` 的验收基准是一棵**确定性合成目录树** + 同一次生成的**植入真值台账**。
+两者都不入仓（`devdisk-out/` 已在 `.gitignore`），按需生成：
+
+```bash
+# 生成（固定 seed，覆盖 plan/04 §2.2 的 22 类样本）
+py -X utf8 tools/gen_synth_tree.py --out devdisk-out/synth --seed 20261018
+
+# 位级一致自检：重新生成到临时目录逐项比对（一致 0 / 不一致 1）
+py -X utf8 tools/gen_synth_tree.py --out devdisk-out/synth --seed 20261018 --check
+
+# 扫描（--min-bytes 0 让全部样本进入候选）
+py -X utf8 -m devdisk scan devdisk-out/synth --out devdisk-out/scan.json --min-bytes 0
+
+# 基准：双边门（类型/体积/mtime/项目根逐项对账 + 误判 0 + 检出率 100%）
+py -X utf8 tools/bench_scan.py --tree devdisk-out/synth
+```
+
+类型规则表与忽略规则是**单点数据文件**（`data/rules/types.json`、`data/rules/ignore.txt`），
+规则缺失或格式错时 `scan` 返回退出码 `4`，不会静默退回内置默认。
 
 ## 开发与回归
 

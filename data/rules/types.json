@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "source": "本项目设计；样本覆盖依据 plan/04-数据计划.md §2.2，口径依据 data/README.md §四 第 3 条",
+  "generated_by": "hand-written (M1)",
+  "order": [
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    ".next",
+    ".cache",
+    "dist",
+    "build",
+    "out",
+    "target",
+    "git"
+  ],
+  "rules": [
+    {
+      "type": "node_modules",
+      "names": ["node_modules"],
+      "note": "npm/pnpm/yarn 依赖目录"
+    },
+    {
+      "type": ".venv",
+      "names": [".venv"],
+      "note": "Python 虚拟环境（隐藏名）"
+    },
+    {
+      "type": "venv",
+      "names": ["venv"],
+      "note": "Python 虚拟环境（常规名）"
+    },
+    {
+      "type": "__pycache__",
+      "names": ["__pycache__"],
+      "note": "Python 字节码缓存"
+    },
+    {
+      "type": ".mypy_cache",
+      "names": [".mypy_cache"],
+      "note": "mypy 增量缓存"
+    },
+    {
+      "type": ".pytest_cache",
+      "names": [".pytest_cache"],
+      "note": "pytest 缓存"
+    },
+    {
+      "type": ".tox",
+      "names": [".tox"],
+      "note": "tox 多环境目录"
+    },
+    {
+      "type": ".next",
+      "names": [".next"],
+      "note": "Next.js 构建产物"
+    },
+    {
+      "type": ".cache",
+      "names": [".cache"],
+      "prefixes": ["cache-"],
+      "note": "通用缓存目录；cache-xxxx 为规模样本命名"
+    },
+    {
+      "type": "dist",
+      "names": ["dist"],
+      "note": "打包/构建产物"
+    },
+    {
+      "type": "build",
+      "names": ["build"],
+      "note": "构建产物"
+    },
+    {
+      "type": "out",
+      "names": ["out"],
+      "note": "通用输出目录"
+    },
+    {
+      "type": "target",
+      "names": ["target"],
+      "note": "Rust/Cargo 构建产物"
+    },
+    {
+      "type": "git",
+      "names": [".git"],
+      "note": "Git 元数据目录；只读，分级为禁止"
+    }
+  ]
+}

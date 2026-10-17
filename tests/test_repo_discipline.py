@@ -150,14 +150,93 @@ def test_no_absolute_local_paths_in_tracked_docs():
                          r"|/home/[A-Za-z0-9._-]+/"
                          r"|/Users/[A-Za-z0-9._-]+/")
     offenders = []
-    for name in ("README.md", "plan/00-README总览.md", "plan/01-题目文档.md",
-                 "plan/02-架构与技术选型.md", "plan/03-模块详设.md",
-                 "plan/04-数据计划.md", "plan/05-里程碑与发布.md",
-                 "plan/06-交付对标与决策.md", "plan/HANDOFF-M1.md",
-                 "data/README.md"):
+    for name in doc_files():
         path = os.path.join(REPO_ROOT, name)
         if not os.path.isfile(path):
             continue
         if pattern.search(read_text(path)):
             offenders.append(name)
     assert offenders == []
+
+
+def doc_files():
+    """仓库内需要脱敏扫查的文档（新文档落盘时要加进来）。"""
+    names = ["README.md", "data/README.md"]
+    names += sorted("plan/" + name for name in os.listdir(os.path.join(REPO_ROOT, "plan"))
+                    if name.endswith(".md"))
+    return names
+
+
+# ------------------------------------------------------------------ M1 数据守门
+
+
+def test_rule_tables_exist_and_are_registered():
+    """规则表是数据资产：既要落盘，也要在 plan/04 资产总表里登记来源。"""
+    for rel in ("data/rules/types.json", "data/rules/ignore.txt"):
+        assert os.path.isfile(os.path.join(REPO_ROOT, rel)), rel
+
+    plan04 = read_text(os.path.join(REPO_ROOT, "plan", "04-数据计划.md"))
+    assert "data/rules/types.json" in plan04
+    assert "data/rules/ignore.txt" in plan04
+
+    payload = read_text(os.path.join(REPO_ROOT, "data/rules/types.json"))
+    assert "source" in payload, "规则表必须自带来源字段"
+
+
+def test_type_rules_cover_plan_04_samples():
+    """样本清单里的类型必须都能在规则表里匹配到，避免样本被静默忽略。"""
+    import json
+    import sys
+
+    sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+    from devdisk.rules import load_rules
+
+    types, _ = load_rules()
+    payload = json.loads(read_text(os.path.join(REPO_ROOT, "data/rules/types.json")))
+    declared = set(payload["order"])
+
+    required = {"node_modules", ".venv", "__pycache__", ".mypy_cache", ".pytest_cache",
+                ".tox", ".next", ".cache", "dist", "build", "out", "target", "git"}
+    assert required <= declared, required - declared
+    for name in required:
+        assert types.get(name) is not None, name
+
+
+def test_generator_does_not_use_random_module():
+    """确定性纪律：生成器必须自研 RNG，不得依赖 `random`（跨版本序列不保证）。"""
+    text = read_text(os.path.join(TOOLS_ROOT, "gen_synth_tree.py"))
+    assert "import random" not in text
+    assert "from random" not in text
+    assert "splitmix64" in text.lower() or "SplitMix64" in text
+
+
+def test_generator_does_not_read_system_clock():
+    """确定性纪律：不得用 time.time()/datetime.now() 作为数据内容或 mtime 来源。"""
+    text = read_text(os.path.join(TOOLS_ROOT, "gen_synth_tree.py"))
+    for banned in ("time.time(", "datetime.datetime.now", "datetime.now("):
+        assert banned not in text, banned
+
+
+def test_truth_files_never_contain_observed_fields():
+    """K12：任何生成的真值文件都不得出现 `observed_*`。"""
+    import json
+
+    truth_dir = os.path.join(REPO_ROOT, "devdisk-out")
+    if not os.path.isdir(truth_dir):
+        pytest.skip("未生成 devdisk-out（按需生成，不入仓）")
+    for dirpath, dirnames, filenames in os.walk(truth_dir):
+        for name in filenames:
+            if name != "manifest.json":
+                continue
+            payload = json.loads(read_text(os.path.join(dirpath, name)))
+            assert "observed_" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_tools_scripts_are_executable_entrypoints():
+    """tools/ 下的脚本必须能被 `py tools/x.py --help` 调用（无 import 期副作用）。"""
+    for name in ("gen_synth_tree.py", "bench_scan.py"):
+        path = os.path.join(TOOLS_ROOT, name)
+        assert os.path.isfile(path), name
+        text = read_text(path)
+        assert "def main(" in text
+        assert '__name__ == "__main__"' in text

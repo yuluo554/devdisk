@@ -18,7 +18,6 @@ PROG = "devdisk"
 
 # 骨架期未实现的子命令；能力落地那一棒必须同轮从本表移除并补离线冒烟。
 NOT_READY_COMMANDS = {
-    "scan": "M1（扫描与分类）",
     "audit": "M3（Docker 与 .git 只读审计）",
     "clean": "M4（隔离区清理）",
     "undo": "M4（隔离区撤销）",
@@ -97,6 +96,33 @@ def _not_ready(command):
     return exit_codes.NOT_READY
 
 
+def _run_scan(args):
+    """scan 子命令：只做参数传递与退出码映射。"""
+    from . import pipeline
+
+    try:
+        code, payload, lines = pipeline.run_scan(
+            roots=args.roots,
+            out=args.out,
+            output_format=args.format,
+            min_bytes=args.min_bytes,
+            keep_paths=args.keep,
+            config_path=args.config,
+        )
+    except pipeline.ScanError as exc:
+        sys.stderr.write("%s：%s\n" % (PROG, exc))
+        return exc.exit_code
+    except OSError as exc:
+        sys.stderr.write(
+            "%s：写盘失败：%s\n下一步：确认输出目录可写，或用 `--out` 指定其他路径。\n"
+            % (PROG, exc)
+        )
+        return exit_codes.USAGE
+
+    _emit(lines)
+    return code
+
+
 def main(argv=None):
     ensure_utf8_stdio()
     parser = build_parser()
@@ -118,6 +144,9 @@ def main(argv=None):
         code, lines = run_selftest(parser)
         _emit(lines)
         return code
+
+    if args.command == "scan":
+        return _run_scan(args)
 
     if args.command in NOT_READY_COMMANDS:
         return _not_ready(args.command)

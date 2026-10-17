@@ -46,3 +46,16 @@ jobs:
           for cmd in scan audit clean undo report selftest; do
             grep -q "$cmd" help.txt
           done
+
+      # M1：数据先行 + 扫描（离线，零网络）
+      - name: Data (generate synth tree)
+        run: python tools/gen_synth_tree.py --out devdisk-out/synth --seed 20261018
+
+      - name: Data (generator is bit-identical)
+        run: python tools/gen_synth_tree.py --out devdisk-out/synth --seed 20261018 --check
+
+      - name: Smoke (scan offline)
+        run: python -m devdisk scan devdisk-out/synth --out devdisk-out/scan.json --min-bytes 0
+
+      - name: Bench (scan vs truth, dual gate)
+        run: python tools/bench_scan.py --tree devdisk-out/synth

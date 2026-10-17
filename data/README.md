@@ -38,6 +38,16 @@
 
 **可获取性结论**：本题**无外部数据依赖**；验收主路径是合成目录树 + 固定 fixture，Docker 真实环境只作可选增强。
 
+### 二之一、仓库内数据资产登记（M1 起）
+
+| 资产 | 位置 | 来源 | 许可/状态 |
+|---|---|---|---|
+| 类型规则表 | `data/rules/types.json` | 本项目设计（目录名 + 项目标志文件），依据 `plan/01` 模块① 与 `plan/03` 模块① | 本项目原创，随源码包分发；JSON 自带 `source` 字段 |
+| 忽略规则表 | `data/rules/ignore.txt` | 本项目设计（自定最小语法：字面名 / `*` 前缀后缀 / `/` 锚定），**非** `.gitignore` 拷贝 | 同上 |
+
+> 两个规则表是类型与忽略的**唯一来源**；缺失或格式错时运行期返回退出码 4，禁止静默回退到内置默认。
+> 合成目录树与植入真值仍是"按需生成、不入仓"（生成器：`tools/gen_synth_tree.py`）。
+
 ## 三、合成数据纪律
 
 - **假名白名单**：合成目录树一律使用假项目名（如 `demo-web`、`demo-api`、`demo-mobile`）、假包名（如 `demo-pkg-a`）、假用户名目录（如 `devuser`），禁用任何真实项目名、真实公司名、真实用户名。
@@ -54,8 +64,8 @@
 1. **体积单位**：内部一律用**字节（int）**累计与比较；展示层按 1024 进制换算为 KiB/MiB/GiB，保留两位小数；聚合与排行必须基于原始字节，不得四舍五入后再求和。
 2. **候选阈值**：只有体积 ≥ 配置项 `candidate_min_bytes` 的目录才进入候选清单（默认值在配置文件中单点定义，不在文档写死）。低于阈值的目录仍计入"其他"合计，但不参与排行。
 3. **目录类型规则**：类型标签与匹配规则（目录名、所在项目根标志文件）只在类型规则表中定义；同一路径只取一个主类型，命中多个时按规则表顺序取第一个。
-4. **物理对象去重**：以 `(st_dev, st_ino)` 作为同一物理对象的键；硬链接与重复挂载只计一次。
-5. **符号链接**：`lstat` 判定；**一律不跟随**；指向扫描根之外的目标记 `skipped:outside_root`，环形链接记 `skipped:symlink_cycle`。
+4. **物理对象去重**：目录以 `(st_dev, st_ino)` 为键；文件仅对 `st_nlink > 1` 的硬链接去重。硬链接与重复挂载只计一次。Windows 上 `DirEntry.stat()` 的 `st_ino` 恒为 0，扫描器在 inode 缺失时必须退回 `os.lstat`——否则去重会静默失效。
+5. **符号链接**：`lstat` 判定；**一律不跟随**。跳过原因细分为：指向扫描根之外的目标 → `skipped:outside_root`；环形链接 → `skipped:symlink_cycle`；指向根内 → `skipped:symlink_not_followed`。Windows 上 junction（reparse point）与 symlink 同等对待，用 `symlink_kind` 区分，不按平台名分支。
 6. **最后修改时间**：取目录内文件 `mtime` 的**最大值**（目录自身 mtime 不作为依据，避免被新建/删除子项扰动）；统一以 UTC ISO-8601 输出。
 7. **分级枚举与优先级**：`forbidden`（禁止）> `caution`（谨慎）> `safe`（安全可删）。命中规则表靠前的等级即返回；无规则命中或证据不足 → `caution`（**不得默认 safe**）。
 8. **证据门槛**：`evidence` 至少 1 条才允许输出 `safe`；`forbidden` 与 `caution` 也必须给理由字符串。证据只来自路径、体积、mtime 与白名单元数据文件（`.gitignore`、`package.json`、`pyproject.toml`、`requirements.txt`、`poetry.lock`、`package-lock.json` 等）。
@@ -79,7 +89,7 @@
 
 | 类型 | 白名单 | 状态 |
 |---|---|---|
-| 项目名 | demo-web、demo-api、demo-mobile、demo-infra | ✅ 登记 |
+| 项目名 | demo-web、demo-api、demo-mobile、demo-infra、demo-mono | ✅ 登记 |
 | 包名 | demo-pkg-a、demo-pkg-b、demo-lib-core | ✅ 登记 |
 | 用户名目录 | devuser、tester | ✅ 登记 |
 | 公司/机构名 | 一律禁用 | 红线 |

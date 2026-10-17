@@ -46,14 +46,39 @@ def test_unknown_command_is_usage_error():
 
 @pytest.mark.parametrize("command", sorted(cli.NOT_READY_COMMANDS))
 def test_skeleton_commands_report_not_ready(command):
-    argv = {"scan": ["scan", "."],
-            "audit": ["audit"],
+    argv = {"audit": ["audit"],
             "clean": ["clean"],
             "undo": ["undo", "20261018-120000-a1b2c3"],
             "report": ["report", "--input", "x.json", "--html", "x.html"]}[command]
     code, _, err = run_cli(argv)
     assert code == exit_codes.NOT_READY
     assert command in err
+    assert "下一步" in err
+
+
+def test_scan_is_retired_from_not_ready():
+    """M1 退役：scan 不得再出现在 NOT_READY 表里。"""
+    assert "scan" not in cli.NOT_READY_COMMANDS
+
+
+def test_scan_runs_offline(tmp_path):
+    root = tmp_path / "root"
+    (root / "demo-web" / "node_modules").mkdir(parents=True)
+    (root / "demo-web" / "package.json").write_text("{}", encoding="utf-8")
+    (root / "demo-web" / "node_modules" / "a.js").write_bytes(b"x" * 64)
+    out = tmp_path / "scan.json"
+
+    code, stdout, stderr = run_cli(["scan", str(root), "--out", str(out), "--min-bytes", "0"])
+    assert code == exit_codes.OK, stderr
+    assert "候选目录" in stdout
+    assert out.is_file()
+    assert b"\r\n" not in out.read_bytes()
+
+
+def test_scan_missing_root_returns_usage(tmp_path):
+    code, _, err = run_cli(["scan", str(tmp_path / "nope"), "--out", str(tmp_path / "o.json")])
+    assert code == exit_codes.USAGE
+    assert "不存在" in err
     assert "下一步" in err
 
 
@@ -86,6 +111,47 @@ def test_selftest_fails_when_exit_codes_collide(monkeypatch):
     code, lines = selftest_module.run_selftest(cli.build_parser())
     assert code != exit_codes.OK
     assert any("重复" in line for line in lines)
+
+
+def test_selftest_fails_when_retired_command_reappears(monkeypatch):
+    """变异验证：把已退役的 scan 塞回 NOT_READY，selftest 必须变红。"""
+    from devdisk import selftest as selftest_module
+
+    monkeypatch.setitem(cli.NOT_READY_COMMANDS, "scan", "M1")
+    code, lines = selftest_module.run_selftest(cli.build_parser())
+    assert code != exit_codes.OK
+    assert any("退役" in line for line in lines)
+
+
+def test_selftest_fails_when_type_rule_table_is_broken(monkeypatch):
+    """变异验证：类型规则表坏掉，selftest 必须变红。"""
+    from devdisk import rules as rules_module
+    from devdisk import selftest as selftest_module
+
+    def boom():
+        raise rules_module.RulesError("模拟规则表缺失")
+
+    monkeypatch.setattr(rules_module, "load_rules", boom)
+    code, lines = selftest_module.run_selftest(cli.build_parser())
+    assert code != exit_codes.OK
+    assert any("规则表" in line for line in lines)
+
+
+def test_selftest_fails_when_git_type_missing(monkeypatch):
+    """变异验证：类型表丢掉 .git，selftest 必须变红（只读样本失去输入）。"""
+    from devdisk import rules as rules_module
+    from devdisk import selftest as selftest_module
+
+    class FakeRules(object):
+        types = ["node_modules"]
+
+        def match(self, name):
+            return "node_modules" if name == "node_modules" else None
+
+    monkeypatch.setattr(rules_module, "load_rules", lambda *a, **k: (FakeRules(), object()))
+    code, lines = selftest_module.run_selftest(cli.build_parser())
+    assert code != exit_codes.OK
+    assert any(".git" in line for line in lines)
 
 
 def test_no_select_all_flag():

@@ -17,9 +17,12 @@
 | plan/05-里程碑与发布.md | 逐里程碑 DoD、退出码退役表、发布流程、状态列 | ✅ v1（M0） |
 | plan/06-交付对标与决策.md | 提交材料对标、评分对标、招牌动词表、待定决策、开放项 | ✅ v1（M0） |
 | plan/HANDOFF-M1.md | 下一棒（M1 数据先行 + 扫描）的交接快照 | ✅ M0 |
+| plan/HANDOFF-M2.md | 下一棒（M2 安全分级）的交接快照 | ✅ M1 |
 | data/README.md | 依据查证记录 + 数据源可获取性 + 合成与口径纪律 | ✅ v1 |
 | .gitignore / .gitattributes | 运行时产物不入仓；源码 LF、二进制不归一 | ✅ v1 |
 | pyproject.toml / src/ / tests/ / tools/ | 可安装骨架、CLI 契约、纪律守门 | ✅ M0 |
+| data/rules/types.json + ignore.txt | 类型规则与忽略规则（单点数据文件，M1） | ✅ M1 |
+| tools/gen_synth_tree.py + tools/bench_scan.py | 合成树生成器与扫描真值基准（M1） | ✅ M1 |
 | .github/workflows/ci.yml | CI 矩阵（windows/ubuntu × 3.8/3.12） | ✅ M0（待首推验证） |
 | plan/RELEASE-M6.md | 发布留档三件套落点 | ⬜ 待 M6 |
 
@@ -42,6 +45,10 @@
 | 2026-10-18 | **M0 骨架落地形态**：`src/devdisk` 单包 + 5 子命令 + `selftest` | 包名/CLI 名统一 `devdisk`；Python 底线 3.8；零运行时依赖；`dev` extra 只有 pytest。**用户未逐项答复 D1–D8，按 `plan/06` §五 推荐默认执行，可事后调整**（均为零消费者窗口内的可逆项）。 |
 | 2026-10-18 | 退出码 6 值语义定案（0/1/2/3/4/5） | `NOT_READY` 只用于骨架期，逐里程碑退役（`plan/05` §三）。骨架期先把"未知命令=2"与"未实现=3"分开，避免后续把"没做"误读成"用法错误"。 |
 | 2026-10-18 | 源码删除调用采用**白名单制守门** | `shutil.rmtree`/`os.rmdir` 全禁；`os.remove`/`os.unlink` 仅允许出现在 `serialize.py` 的临时文件清理里。理由：绝对禁止会让确定性写盘无法清理失败残留，而按文件白名单可审计、可变异验证。 |
+| 2026-10-18 | **M1 落地形态**：规则表为数据文件、扫描层与编排层分离 | `data/rules/types.json` + `ignore.txt` 是类型与忽略的**唯一来源**；规则缺失/格式错 → 退出码 4，不静默用内置默认。新增 `model.py`（值对象）/`rules.py`（规则加载）/`pipeline.py`（编排）三层，`cli.py` 保持零判定。 |
+| 2026-10-18 | Windows 上 junction 与 symlink 统一按"链接"处理 | 本机与 CI 的 Windows runner 都没有 `SeCreateSymbolicLinkPrivilege`；junction 具备同等"不跟随 + 可能越界"的安全语义。测试按**文件系统能力**探测并如实记录，不按平台名硬编码。 |
+| 2026-10-18 | 扫描器在 inode 缺失时退回 `os.lstat` | 实测（3.8 与 3.12）`DirEntry.stat()` 在 Windows 上 `st_ino/st_dev/st_nlink` 恒为 0，会静默禁用硬链接去重。这是正确性修复，不是可选项。 |
+| 2026-10-18 | 读不到的候选目录**不产出 0 字节条目** | 把"读不到"报成"0 字节"会让分级与报告给出错误结论；改为记 `skipped:permission_denied` 并从候选清单排除。 |
 
 ## 承诺-证据台账
 
@@ -49,18 +56,18 @@
 
 | 承诺项 | 素材来源 | 交付物内可达性 | 核验方式 | 状态 |
 |---|---|---|---|---|
-| 多类型扫描与分类（node_modules/dist/build/.venv/__pycache__/.mypy_cache/.tox/.next/.cache/target/out 等） | Python 标准库 `os.scandir`；类型规则表随包 | 纯本地，无外部服务 | 合成树基准：类型识别与体积合计对真值 | ⬜ 待 M1 |
-| 符号链接不跟随、不越界、不重复计数 | `entry.is_symlink()` + `(st_dev, st_ino)` 去重 | 运行时逻辑 | 符号链接与环形链接负样本；扫描根外目标断言被跳过 | ⬜ 待 M1 |
+| 多类型扫描与分类（node_modules/dist/build/.venv/__pycache__/.mypy_cache/.tox/.next/.cache/target/out 等） | Python 标准库 `os.scandir`；类型规则表随包 | 纯本地，无外部服务 | 合成树基准：类型识别与体积合计对真值 | ✅ M1（`bench_scan.py` 18/18 检出、0 误判、逐项 0 差异） |
+| 符号链接不跟随、不越界、不重复计数 | `entry.is_symlink()` + reparse 判定 + `(st_dev, st_ino)` 去重 | 运行时逻辑 | 符号链接与环形链接负样本；扫描根外目标断言被跳过 | ✅ M1（越界记 `outside_root`、环记 `symlink_cycle`、硬链接去重有专门用例） |
 | 三级安全分级（安全可删/谨慎/禁止） | 本题设计；证据来自目录结构、mtime、白名单元数据文件 | 运行时逻辑 | 分级基准：与植入真值一致；证据不足落"谨慎" | ⬜ 待 M2 |
 | 分级理由与证据可解释（非裸标签） | 本题设计 | CLI 输出与 HTML 报告均展示 | 每条断言 `reason` 非空且 `evidence` ≥ 1 条 | ⬜ 待 M2 |
 | Docker 只读审计（`docker system df` 解析四类体积） | Docker CLI 可选增强 | 缺失时 `skipped:docker_unavailable` 降级 | fixture 基准：解析正确；无 prune 调用；`applied: false` | ⬜ 待 M3 |
 | `.git` 只读审计（objects 体积、pack 数、loose 数） | 文件系统统计；不调用 git 写操作 | 纯本地 | 合成仓库基准：数值正确；审计前后 `.git` 元数据不变 | ⬜ 待 M3 |
 | `.git` 永不自动处理、只建议 `git gc` | 产品纪律 | 代码层无删除/gc 调用；输出标注 `applied: false` | 静态扫描：无 `git gc`/`git prune` 执行；动态：仓库无变化 | ⬜ 待 M3 |
 | 隔离区 `.trash/<batch-id>/` + manifest + 一键撤销 | 本题设计；`shutil.move` | CLI 子命令 | 撤销后 tree digest 一致；中断恢复用例 | ⬜ 待 M4 |
-| 永不 `rm -rf`、无"一键清理全部" | 产品纪律 | 代码与 CLI 均无此路径 | 静态扫描：无 `rm -rf`/`shutil.rmtree`；CLI 无全选参数 | ⬜ 待 M4 |
+| 永不 `rm -rf`、无"一键清理全部" | 产品纪律 | 代码与 CLI 均无此路径 | 静态扫描：无 `rm -rf`/`shutil.rmtree`；CLI 无全选参数 | ⬜ 待 M4（M1 已加：扫描层不产生删除调用） |
 | 单文件中文 HTML 报告（体积排行/项目与类型聚合/可删合计） | 标准库模板 | 报告文件随仓生成 | 报告无外部 URL；合计与排行对真值；断网可读 | ⬜ 待 M5 |
-| 合成目录树 + 植入真值（已知分级与总体积） | 本题自制（假项目名/假体积） | 生成器随仓 | 程序化再生成；同种子一致；真值与引擎解耦 | ⬜ 待 M1 |
-| 隐私红线：只扫路径/体积/mtime，零上传、零遥测 | 本题设计 | 仓库基建 + 运行时 | 无网络调用扫描；真实审计结果与隔离区不入 git | ⬜ 待 M1 |
+| 合成目录树 + 植入真值（已知分级与总体积） | 本题自制（假项目名/假体积） | 生成器随仓 | 程序化再生成；同种子一致；真值与引擎解耦 | ✅ M1（`--check` 位级一致；真值无 `observed_*`） |
+| 隐私红线：只扫路径/体积/mtime，零上传、零遥测 | 本题设计 | 仓库基建 + 运行时 | 无网络调用扫描；真实审计结果与隔离区不入 git | ✅ M1（`test_source_has_no_network_imports` 常驻；`devdisk-out/` 不入仓） |
 | 与 kondo/npkill 能力重叠如实标注 | 基准日检索快照 + README 原文 | 题面 §六 与 README | 文档核对：含重叠清单，无"首创/空白"措辞 | ⬜ 待 M6 |
 | 发布三件套 | 本题设计 | 仓库发布流程 | git tag + GitHub Release（附产物）+ `plan/RELEASE-M6.md` 留档 | ⬜ 待 M6 |
 
