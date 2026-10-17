@@ -1,0 +1,130 @@
+# -*- coding: utf-8 -*-
+"""命令行入口。
+
+纪律：
+- 只做参数解析、编排调用与退出码映射，不含任何分级/体积/建议判定。
+- 人类可读摘要走 stdout，错误与降级说明走 stderr。
+- 中文文案；错误信息要说明"下一步可做什么"。
+"""
+
+import argparse
+import sys
+
+from . import __version__
+from . import exit_codes
+from .encoding import ensure_utf8_stdio
+
+PROG = "devdisk"
+
+# 骨架期未实现的子命令；能力落地那一棒必须同轮从本表移除并补离线冒烟。
+NOT_READY_COMMANDS = {
+    "scan": "M1（扫描与分类）",
+    "audit": "M3（Docker 与 .git 只读审计）",
+    "clean": "M4（隔离区清理）",
+    "undo": "M4（隔离区撤销）",
+    "report": "M5（单文件 HTML 报告）",
+}
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog=PROG,
+        description="开发者磁盘占用审计与安全清理（默认只读，清理走隔离区可回滚）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "退出码：0 正常 / 1 拒绝或冲突 / 2 用法错误 / 3 未就绪 / 4 能力降级 / 5 安全拒绝\n"
+            "本工具不提供\"全选\"或\"一键清理全部\"；清理必须逐条或逐批显式选择。"
+        ),
+    )
+    parser.add_argument("--version", action="version", version="%s %s" % (PROG, __version__))
+
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+
+    scan = subparsers.add_parser("scan", help="扫描目录并分级，输出候选清单")
+    scan.add_argument("roots", nargs="+", metavar="<root>", help="一个或多个扫描根目录")
+    scan.add_argument("--out", default=None, help="候选清单输出路径（默认 devdisk-out/scan.json）")
+    scan.add_argument("--format", choices=["json", "csv"], default="json", help="输出格式")
+    scan.add_argument("--min-bytes", type=int, default=None, help="候选体积阈值（字节）")
+    scan.add_argument("--keep", action="append", default=[], metavar="<path>",
+                      help="显式保留路径，可重复（命中的条目分级为禁止）")
+    scan.add_argument("--config", default=None, help="配置文件路径")
+
+    audit = subparsers.add_parser("audit", help="Docker 与 .git 只读审计")
+    audit.add_argument("--root", action="append", default=[], metavar="<root>",
+                       help="扫描根，可重复")
+    audit.add_argument("--docker", action="store_true", help="审计 Docker（只调用 docker system df）")
+    audit.add_argument("--git", action="store_true", help="审计 .git 对象（只读统计）")
+    audit.add_argument("--out", default=None, help="审计结果输出路径（默认 devdisk-out/audit.json）")
+
+    clean = subparsers.add_parser("clean", help="把选中项移入隔离区（默认 dry-run）")
+    clean.add_argument("--from", dest="from_scan", default=None, metavar="<scan.json>",
+                       help="候选清单路径")
+    clean.add_argument("--select", action="append", default=[], metavar="<path>",
+                       help="显式选中的路径，可重复")
+    clean.add_argument("--apply", action="store_true", help="真正执行移动（缺省为 dry-run）")
+    clean.add_argument("--yes", action="store_true", help="跳过交互确认")
+    clean.add_argument("--trash", default=None, help="隔离区根目录（默认 <root>/.trash）")
+
+    undo = subparsers.add_parser("undo", help="按 manifest 逆序撤销一个批次")
+    undo.add_argument("batch_id", metavar="<batch-id>", help="批次 ID")
+    undo.add_argument("--trash", default=None, help="隔离区根目录")
+    undo.add_argument("--yes", action="store_true", help="跳过交互确认")
+
+    report = subparsers.add_parser("report", help="生成单文件中文 HTML 报告")
+    report.add_argument("--input", required=True, metavar="<scan.json>", help="候选清单路径")
+    report.add_argument("--audit", default=None, metavar="<audit.json>", help="审计结果路径")
+    report.add_argument("--html", required=True, metavar="<out.html>", help="报告输出路径")
+    report.add_argument("--top", type=int, default=50, help="体积排行条数（默认 50）")
+
+    subparsers.add_parser("selftest", help="自检：校验交付态不变量")
+
+    return parser
+
+
+def _emit(lines, stream=None):
+    stream = stream or sys.stdout
+    for line in lines:
+        stream.write(line + "\n")
+
+
+def _not_ready(command):
+    milestone = NOT_READY_COMMANDS[command]
+    sys.stderr.write(
+        "%s：子命令 `%s` 尚未实现（计划里程碑 %s）。\n"
+        "下一步：查看 `plan/05-里程碑与发布.md` 的退役表，或先运行 `%s selftest`。\n"
+        % (PROG, command, milestone, PROG)
+    )
+    return exit_codes.NOT_READY
+
+
+def main(argv=None):
+    ensure_utf8_stdio()
+    parser = build_parser()
+
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:  # argparse 的 --help / --version / 用法错误
+        code = exc.code if isinstance(exc.code, int) else exit_codes.USAGE
+        return code
+
+    if args.command is None:
+        parser.print_help(sys.stderr)
+        sys.stderr.write("\n%s：缺少子命令。请使用 `%s --help` 查看可用命令。\n" % (PROG, PROG))
+        return exit_codes.USAGE
+
+    if args.command == "selftest":
+        from .selftest import run_selftest
+
+        code, lines = run_selftest(parser)
+        _emit(lines)
+        return code
+
+    if args.command in NOT_READY_COMMANDS:
+        return _not_ready(args.command)
+
+    sys.stderr.write("%s：未知子命令 `%s`。\n" % (PROG, args.command))
+    return exit_codes.USAGE
+
+
+if __name__ == "__main__":
+    sys.exit(main())

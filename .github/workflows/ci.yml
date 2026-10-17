@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.8", "3.12"]
+    env:
+      PYTHONUTF8: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Smoke (module form)
+        run: python -m devdisk --version
+
+      - name: Smoke (console script)
+        run: devdisk --version
+
+      - name: Smoke (selftest)
+        run: devdisk selftest
+
+      - name: Smoke (help lists commands)
+        shell: bash
+        run: |
+          devdisk --help > help.txt
+          for cmd in scan audit clean undo report selftest; do
+            grep -q "$cmd" help.txt
+          done

@@ -1,0 +1,118 @@
+# -*- coding: utf-8 -*-
+"""CLI 契约测试：退出码、子命令面、骨架期语义。"""
+
+import io
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+
+import pytest
+
+from devdisk import __version__
+from devdisk import cli
+from devdisk import exit_codes
+
+
+def run_cli(argv):
+    """在进程内调用 main()，返回 (退出码, stdout, stderr)。"""
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = cli.main(argv)
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_version_returns_zero_and_prints_version():
+    code, out, _ = run_cli(["--version"])
+    assert code == exit_codes.OK
+    assert __version__ in out
+
+
+def test_help_lists_all_commands():
+    code, out, _ = run_cli(["--help"])
+    assert code == exit_codes.OK
+    for name in ("scan", "audit", "clean", "undo", "report", "selftest"):
+        assert name in out
+
+
+def test_missing_command_is_usage_error():
+    code, _, err = run_cli([])
+    assert code == exit_codes.USAGE
+    assert "缺少子命令" in err
+
+
+def test_unknown_command_is_usage_error():
+    code, _, _ = run_cli(["bogus-command"])
+    assert code == exit_codes.USAGE
+
+
+@pytest.mark.parametrize("command", sorted(cli.NOT_READY_COMMANDS))
+def test_skeleton_commands_report_not_ready(command):
+    argv = {"scan": ["scan", "."],
+            "audit": ["audit"],
+            "clean": ["clean"],
+            "undo": ["undo", "20261018-120000-a1b2c3"],
+            "report": ["report", "--input", "x.json", "--html", "x.html"]}[command]
+    code, _, err = run_cli(argv)
+    assert code == exit_codes.NOT_READY
+    assert command in err
+    assert "下一步" in err
+
+
+def test_selftest_passes_on_skeleton():
+    code, out, _ = run_cli(["selftest"])
+    assert code == exit_codes.OK
+    assert "OK" in out
+
+
+def test_selftest_fails_when_a_command_is_missing(monkeypatch):
+    """变异验证：从解析器里摘掉一个子命令，selftest 必须变红。"""
+    parser = cli.build_parser()
+    for action in parser._actions:  # noqa: SLF001
+        choices = getattr(action, "choices", None)
+        if isinstance(choices, dict) and "scan" in choices:
+            del choices["scan"]
+
+    from devdisk.selftest import run_selftest
+
+    code, lines = run_selftest(parser)
+    assert code != exit_codes.OK
+    assert any("scan" in line for line in lines)
+
+
+def test_selftest_fails_when_exit_codes_collide(monkeypatch):
+    """变异验证：把两个退出码改成同值，selftest 必须变红。"""
+    from devdisk import selftest as selftest_module
+
+    monkeypatch.setattr(selftest_module.exit_codes, "UNSAFE", exit_codes.USAGE)
+    code, lines = selftest_module.run_selftest(cli.build_parser())
+    assert code != exit_codes.OK
+    assert any("重复" in line for line in lines)
+
+
+def test_no_select_all_flag():
+    """产品纪律：CLI 不得提供全选/一键清理参数。"""
+    parser = cli.build_parser()
+    forbidden = {"all", "everything", "yes-all", "clean-all"}
+    for action in parser._actions:  # noqa: SLF001
+        choices = getattr(action, "choices", None)
+        if not isinstance(choices, dict):
+            continue
+        for name, sub in choices.items():
+            for sub_action in sub._actions:  # noqa: SLF001
+                option_strings = set(sub_action.option_strings)
+                for bad in forbidden:
+                    assert "--%s" % bad not in option_strings, (name, bad)
+
+
+def test_module_entry_point_delegates_to_main():
+    """`python -m devdisk` 走 __main__，必须与 main() 同语义。"""
+    import devdisk.__main__ as entry
+
+    assert entry.main is cli.main
+
+
+def test_stdout_is_utf8_after_entry(monkeypatch):
+    """入口守卫不应在 UTF-8 环境下破坏流。"""
+    from devdisk.encoding import ensure_utf8_stdio
+
+    ensure_utf8_stdio()
+    assert sys.stdout is not None
