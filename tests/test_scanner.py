@@ -448,8 +448,82 @@ def synth_tree(tmp_path_factory):
     return tree
 
 
+def load_truth(tree):
+    return json.loads((tree / "truth" / "manifest.json").read_text(encoding="utf-8"))
+
+
+# plan/04 §2.2 的 22 类样本意图 → 实际落点。契约性断言：样本少一个即视为未覆盖。
+SAMPLE_INTENTS = {
+    1: "demo-web/node_modules",
+    2: "demo-web/legacy/node_modules",
+    3: "demo-api/.venv",
+    4: "demo-api/services/worker/.venv",
+    5: "demo-api/__pycache__",
+    6: "demo-api/.mypy_cache",
+    7: "demo-api/.pytest_cache",
+    8: "demo-mobile/.tox",
+    9: "demo-web/dist",
+    10: "demo-web/legacy/dist",
+    11: "demo-api/build",
+    12: "demo-web/.next",
+    13: "demo-web/.cache",
+    14: "demo-infra/target",
+    15: "demo-infra/out",
+    16: "demo-mono/node_modules",
+    17: "demo-web/link-outside",
+    18: "demo-api/loop-a",
+    19: "demo-api/locked",
+    20: "demo-infra/.git",
+    21: "",                      # 扫描根本身
+    22: "demo-mono/pool/cache-",  # 1000 目录规模样本（前缀）
+}
+
+
+def test_synth_tree_covers_all_22_sample_intents(synth_tree):
+    """`plan/04` §2.2 的 22 类样本必须逐个有落点（候选或跳过或规模组）。"""
+    truth = load_truth(synth_tree)
+    _, payload, _ = pipeline.run_scan([str(synth_tree)],
+                                      out=str(synth_tree.parent / "scan-cover.json"),
+                                      min_bytes=0)
+
+    candidates = {os.path.relpath(c["path"], str(synth_tree)).replace(os.sep, "/")
+                  for c in payload["candidates"]}
+    sample_paths = {s["rel_path"] for s in truth["samples"]}
+    skipped = {os.path.relpath(s["path"], str(synth_tree)).replace(os.sep, "/")
+               for s in payload["skipped"]}
+    # 能力相关样本：真值里登记了 platform，落点按"本机能力"判定而不是按平台名。
+    platform_gated = {e["rel_path"]: e.get("platform")
+                      for e in truth["skipped_expect"] if e.get("platform")}
+    scale_prefixes = [s["prefix"] for s in truth["scale_samples"]]
+
+    missing = []
+    for number, rel in sorted(SAMPLE_INTENTS.items()):
+        if number == 22:
+            if not any(path.startswith(rel) for path in candidates):
+                missing.append((number, rel))
+            continue
+        if rel in sample_paths and rel in candidates:
+            continue
+        if rel in skipped:  # 17/18/19 类：以跳过条目落点
+            continue
+        if rel == "" and "" in sample_paths:  # 21：扫描根本身只在真值里登记
+            continue
+        if rel in platform_gated:
+            # 能力不足时本机不构造该样本；真值已如实登记平台要求。
+            continue
+        missing.append((number, rel))
+
+    assert missing == [], "plan/04 §2.2 样本未全部落点：%r（scale=%r）" % (missing, scale_prefixes)
+
+    # 反向断言：凡真值声明了 platform 的样本，本机若不满足能力就必须"确实没落点"，
+    # 而不是既声明平台、又偷偷产出候选（避免用假样本凑覆盖）。
+    for rel, platform in platform_gated.items():
+        if platform == "posix" and os.name == "nt":
+            assert rel not in candidates, rel
+
+
 def test_synth_tree_matches_truth(synth_tree):
-    truth = json.loads((synth_tree / "truth" / "manifest.json").read_text(encoding="utf-8"))
+    truth = load_truth(synth_tree)
     out = synth_tree.parent / "scan.json"
     code, payload, _ = pipeline.run_scan([str(synth_tree)], out=str(out), min_bytes=0)
     assert code == exit_codes.OK

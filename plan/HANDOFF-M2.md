@@ -20,8 +20,8 @@
 
 | 通道 | 命令 | 结果 |
 |---|---|---|
-| 3.12 | `py -3.12 -m pytest -q` | 全绿（77 passed） |
-| 3.8 | `py -3.8 -m pytest -q` | 全绿（77 passed） |
+| 3.12 | `py -3.12 -m pytest -q` | 全绿（78 passed） |
+| 3.8 | `py -3.8 -m pytest -q` | 全绿（78 passed） |
 | 生成器 | `gen_synth_tree.py --check` | exit 0（位级一致） |
 | 基准 | `bench_scan.py --tree devdisk-out/synth` | exit 0（误判 0，检出率达标） |
 | 自检 | `devdisk selftest` | exit 0（含 M1 数据不变量） |
