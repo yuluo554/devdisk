@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+develop-eggs/
+downloads/
+wheels/
+pip-wheel-metadata/
+MANIFEST
+.pytest_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.venv/
+venv/
+env/
+ENV/
+.venv*/
+pypy/
+
+# Distribution / packaging
+*.egg
+*.whl
+*.tar.gz
+*.zip
+!data/samples/**/*.zip
+
+# 本工具运行时产物（真实审计结果、隔离区、报告、索引）
+.trash/
+*.db
+*.sqlite
+*.sqlite3
+audit-output/
+reports/
+*.jsonl
+devdisk-out/
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+
+# 本地笔记
+_private/
+notes.local.md
+
+# 日志
+*.log
+logs/
