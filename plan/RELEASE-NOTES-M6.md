@@ -53,11 +53,22 @@ Windows 与 Ubuntu × Python 3.8/3.12 四矩阵 CI 全绿。
 ------
 
 `devdisk-0.1.0-src.tar.gz` —— 由 `git archive v0.1.0` + `gzip -9n` 生成的**确定性源码包**：
-同一 commit 连续构建两次字节完全一致（sha256 见下方与 `plan/RELEASE-M6.md`）。
+同一 commit 连续构建两次，字节与哈希完全一致。
 
 解包后按上面的「安装」段落执行即可；包内不含任何运行产物、隔离区或真实审计结果。
 
+校验方式（两种，任选其一）：
+
+    # 1) 与 tag 树逐字节比对（不依赖任何写死的哈希）
+    git archive --format=tar --prefix=devdisk-0.1.0/ v0.1.0 | gzip -9n > rebuilt.tar.gz
+    cmp rebuilt.tar.gz devdisk-0.1.0-src.tar.gz && echo "与 tag 树同源"
+
+    # 2) 哈希直接对 Release 页面上登载的值
     sha256sum devdisk-0.1.0-src.tar.gz
+
+（本正文里不写死 sha256：本文件随源码包一起分发，写进去的哈希会因自身内容变化而失效。
+哈希以 Release 页面与 `git log --grep "发布包 sha256"` 的记录为准。）
+
     tar xzf devdisk-0.1.0-src.tar.gz
     cd devdisk-0.1.0
     python -m pip install -e ".[dev]"

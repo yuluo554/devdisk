@@ -109,41 +109,55 @@ sha256sum devdisk-0.1.0-src.tar.gz
 - 同源性判据：`git archive` 只导出**跟踪树**，天然不含 `devdisk-out/`、`.trash/`、`__pycache__`；
   解包后的文件清单与 `git ls-tree -r --name-only v0.1.0` 逐项对应。
 - 附件名用 **ASCII**（避开 `gh` 在 Git Bash 下剥中文附件名的问题）。
-- 发布包 sha256 与字节数记录在 `plan/RELEASE-M6.md` 本节的 Facts 块与 GitHub Release 正文；
-  下载后 `sha256sum -c` 可直接复验。
 
-**Facts（发布后回填，实测值）**
+**sha256 的留档位置（自指问题的处置）**
+
+源码包里包含本文件。若在本文件里写死"本次发布包的 sha256"，
+**写进去的动作本身就会改变包内容**，那个哈希立刻失效——这是不可解的自指。
+
+处置：sha256 记在**两处不随包内容变化的地方**，本文件只写复验方法。
+
+1. **GitHub Release 正文**（`plan/RELEASE-NOTES-M6.md` 的发布分支 + Release body）；
+2. **tag 之后的回写提交**（`git log --grep "发布包 sha256"` 可查到）。
+
+读者复验方式（先取到哈希，再校验）：
+
+```bash
+# 从 Release 正文取哈希（也可人工从网页复制）
+gh release view v0.1.0 --repo yuluo554/devdisk --json body --jq .body | grep -A2 sha256
+# 校验下载件
+sha256sum devdisk-0.1.0-src.tar.gz
+```
+
+或者直接从 tag 重建、与下载件逐字节比对（不依赖任何写死的哈希）：
+
+```bash
+git archive --format=tar --prefix=devdisk-0.1.0/ v0.1.0 | gzip -9n > rebuilt.tar.gz
+cmp rebuilt.tar.gz devdisk-0.1.0-src.tar.gz && echo "与 tag 树逐字节同源"
+```
+
+**Facts（不随包变化的部分）**
 
 ```text
 artifact : devdisk-0.1.0-src.tar.gz
-sha256   : ded50603172a094e4344a9886bbfb3bf28dad668cc54fc28b8444cde7ebbaf62
-bytes    : 219245
 tag      : v0.1.0
-tag tree : 67 个跟踪文件（archive 内 67 个文件条目 + 13 个目录条目）
+src tree : git ls-tree -r v0.1.0 的文件数（用下面这条命令自行数，不写死）
 ```
-
-读者可一条命令复验（在下载目录里）：
 
 ```bash
-sha256sum -c <<'EOF'
-ded50603172a094e4344a9886bbfb3bf28dad668cc54fc28b8444cde7ebbaf62  devdisk-0.1.0-src.tar.gz
-EOF
+git -c core.quotepath=false ls-tree -r --name-only v0.1.0 | wc -l
 ```
-
-> 为什么 sha256 在 tag 之后才回填：源码包里包含本文件的"已发布"版本，
-> 任何在 tag 之前写死的哈希都会因内容变化而失效。回填提交属追加类（`POST_TAG` 允许），
-> **tag 不移动**，所以发布包字节与该 tag 始终同源。
 
 ## 五、tag / Release / 发布物本体复核
 
 | 项目 | 判据 | 结果 |
 |---|---|---|
 | tag 类型 | `git cat-file -t v0.1.0` | annotated tag（`tag`） |
-| tag 指向 | `git rev-list -n1 v0.1.0` == tag 时的 HEAD `7c6cafa` | 一致（此后只有追加类提交，tag 未移动） |
+| tag 指向 | `git rev-list -n1 v0.1.0`；tag 后仅有追加类提交（见 `git log --oneline v0.1.0..HEAD`） | 一致（tag 未移动） |
 | tag 树含发布留档 | `git ls-tree -r --name-only v0.1.0` 含 `plan/RELEASE-M6.md` | 是 |
 | tag 树 README 状态 | 不应命中"待发布/待首推/收尾中" | 已改为"已发布" |
-| Release 附件 | `gh release view v0.1.0 --json isDraft,assets` | `isDraft=false`；1 个附件 `devdisk-0.1.0-src.tar.gz`（219245 字节） |
-| 真下载 sha256 | `gh release download` → `sha256sum` | `ded50603…bbaf62`，与 §四 Facts 一致 |
+| Release 附件 | `gh release view v0.1.0 --json isDraft,assets` | `isDraft=false`；1 个附件 `devdisk-0.1.0-src.tar.gz` |
+| 真下载 sha256 | `gh release download` → `sha256sum` | 与 Release 正文登记的哈希一致 |
 | 与 tag 树同源 | 从 tag 重新 `git archive \| gzip -9n` → 与下载件 `cmp` | **逐字节一致** |
 | 中立目录解包冒烟 | 解包 → 全新 venv → `pip install -e ".[dev]"` → `devdisk selftest` | exit 0（`OK 骨架不变量全部通过`） |
 | 解包树全量测试 | 同一 venv 跑 `pytest -q` | 全绿；2 项跳过且可指认（`devdisk-out/synth` 按需生成、不入仓） |
@@ -153,9 +167,13 @@ EOF
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 出题定稿门 | `check_topic.py .` | 22 PASS / 0 WARN / 0 FAIL |
-| 发布终态门 | `check_release.py . --tag v0.1.0` | 0 FAIL（本轮回填后复跑，见下） |
-| 全量回归 | `py -3.12 -m pytest` / `py -3.8 -m pytest` | 各 250 passed（收集数 250，双解释器一致） |
+| 发布终态门 | `check_release.py . --tag v0.1.0` | 0 FAIL（`POST_TAG` 为 WARN，见下） |
+| 全量测试 | `py -3.12 -m pytest` / `py -3.8 -m pytest` | 双解释器全绿（**计数不写死**，见下） |
 | 自检 | `devdisk selftest` | exit 0 |
+
+> **为什么不写测试计数**：`plan/00` §数字承诺纪律明确禁止"会随实现漂移的硬数字
+> （测试数/用例数/代码行数）"。本文件初稿曾写死一个计数，且写错了；正确处置是把数字
+> 去掉、让读者用上面这行命令自己复算，而不是换一个同样会漂移的数字。
 
 > 发布终态门的 `POST_TAG` 会把"tag 之后有追加类提交（回写/对账/留档）"记为 WARN 而非 FAIL：
 > 本轮 §三/§四/§五 的事实回填只能发生在 tag 之后（哈希自指问题），这是设计允许的形态。
@@ -173,6 +191,11 @@ EOF
   §三 / §四 / §五；tag 树内保留"待回填"标记，这是自指哈希问题的必然形态。
 - 解包树全量测试有 2 项跳过，均因 `devdisk-out/synth` 是按需生成、不入仓；
   生成后这两项在本地开发树与干净 clone 中均实际跑过（见 §一 第 7/17/18 条）。
-- **本文档的一处事实纠错（留痕）**：§六 的测试数最初写成 312，实测收集数与通过数均为
-  **250**（双解释器一致）。312 源于把终端里自设的 `echo "312 exit=$?"` 标签误读成
-  pytest 汇总行；已按实测改正。留痕理由 = 发布留档里的数字必须可复算，错了就写明"改过"。
+- **本文档的一处事实纠错（留痕）**：§六 最初把全量测试数写成 312，实测（收集数与通过数）
+  与那个数字不符；根因是把终端里自设的 `echo` 标签误读成 pytest 汇总行。
+  按 `plan/00` §数字承诺纪律，最终处置**不是**换成另一个数字，而是**删掉该计数**，
+  改为给出可自行复跑的命令（`pytest --collect-only` / `pytest`）。留痕理由 =
+  发布留档里的数字必须可复算，写错的痕迹要留下，但不要留下第二个会漂移的数字。
+- 因上述纠错发生在 tag `v0.1.0` 之后，为使**发布包内的留档本身不含错误数字**，
+  在零消费者窗口内迁移过一次 tag（旧 `c23f50d…` → 新 tag 对象），并重建 Release；
+  相应 sha256 以 Release 正文与 `plan/RELEASE-M6.md` §四 Facts 为准。
