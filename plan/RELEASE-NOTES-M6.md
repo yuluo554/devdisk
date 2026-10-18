@@ -67,7 +67,7 @@ Windows 与 Ubuntu × Python 3.8/3.12 四矩阵 CI 全绿。
     sha256sum devdisk-0.1.0-src.tar.gz
 
 （本正文里不写死 sha256：本文件随源码包一起分发，写进去的哈希会因自身内容变化而失效。
-哈希以 Release 页面与 `git log --grep "发布包 sha256"` 的记录为准。）
+哈希以 **Release 页面正文**为准——那是仓库树之外、不随包内容变化的地方。）
 
     tar xzf devdisk-0.1.0-src.tar.gz
     cd devdisk-0.1.0
