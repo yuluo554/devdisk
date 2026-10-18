@@ -61,14 +61,14 @@ jobs:
         run: python tools/bench_scan.py --tree devdisk-out/synth
 
       # M2：安全分级（规则表是数据，引擎零硬编码规则）
-      - name: Bench (grade vs truth: reasons, evidence, caution fallback)
+      - name: "Bench (grade vs truth: reasons, evidence, caution fallback)"
         run: python tools/bench_grade.py --tree devdisk-out/synth
 
       - name: Bench (grade, independent reference implementation)
         run: python tools/reference_grade.py --tree devdisk-out/synth --scan devdisk-out/scan.json
 
       # M3：只读审计（Docker fixture 为验收主路径；`.git` 只做文件系统统计）
-      - name: Smoke (audit offline: fixture + synth .git)
+      - name: "Smoke (audit offline: fixture + synth .git)"
         run: >
           python -m devdisk audit --root devdisk-out/synth --git
           --docker-fixture data/fixtures/docker_system_df/v24_standard.txt
@@ -78,12 +78,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p empty-bin
-          PY="$(command -v python)"
+          PY="$(python -c 'import sys; print(sys.executable)')"
           set +e
           PATH="$PWD/empty-bin" "$PY" -m devdisk audit --docker --out devdisk-out/audit-degraded.json
           code=$?
           set -e
           test "$code" -eq 4
 
-      - name: Bench (audit: docker fixtures + synth .git)
+      - name: "Bench (audit: docker fixtures + synth .git)"
         run: python tools/bench_audit.py --tree devdisk-out/synth
