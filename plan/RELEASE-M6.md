@@ -69,8 +69,11 @@
 | `push` → main（`035152e`，CI 修复提交） | `39099349952` | **success** | 四矩阵全绿（windows/ubuntu × 3.8/3.12） |
 | `push` → main（`7c6cafa`，发布留档提交） | `39100048326` | **success** | 四矩阵全绿 |
 | `push` tag `v0.1.0`（`7c6cafa`） | `39100349492` | **success** | 四矩阵全绿；`on: push` 无 filters，tag push 确实触发独立一轮 |
+| `push` → main（`3b2d42d`，对账回写） | `39100714912` | **success** | 四矩阵全绿 |
+| `push` → main（`97de096`，测试数纠错） | `39101821429` | **success** | 四矩阵全绿 |
 
-**push 数 = run 数对账**：3 次 push（main × 3）+ 1 次 tag push = 4 轮 run，与 `gh run list` 一致。
+**push 数 = run 数对账**：5 次 main push + 1 次 tag push = 6 轮 run，与 `gh run list` 逐条一致
+（首次首跑失败 + 修复后连续 5 轮绿，无跳过、无重跑）。
 
 **首跑失败根因（如实留档）**：失败面签名是"windows 两个矩阵一起挂、ubuntu 两个过"，
 不是"各平台各挂各的"。定位到唯一失败步骤 `Smoke (audit docker missing degrades)`：
