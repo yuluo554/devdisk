@@ -158,6 +158,20 @@ def test_readme_does_not_claim_ci_green():
     assert "CI 绿" not in readme
 
 
+def test_readme_declares_known_environment_issues():
+    """干净环境验证暴露过的坑必须写在 README，而不是只留在交接文档里。
+
+    实测（M6 干净 clone + 全新 venv）：
+    - 3.8 自带 pip 20.2.3 无法可编辑安装 pyproject-only 项目 → 需先升级 pip；
+    - 非 editable（wheel）安装后规则表不在包内 → 需 `DEVDISK_DATA_DIR`；
+    - Windows `py` 启动器会绕过 venv → 用 `python -m pip`。
+    """
+    readme = read_text(os.path.join(REPO_ROOT, "README.md"))
+    assert "## 已知环境问题" in readme
+    for needle in ("DEVDISK_DATA_DIR", "python -m pip install -U pip", "py` 启动器"):
+        assert needle in readme, needle
+
+
 def test_pyproject_declares_console_script():
     text = read_text(os.path.join(REPO_ROOT, "pyproject.toml"))
     assert "[project.scripts]" in text

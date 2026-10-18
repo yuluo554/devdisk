@@ -12,7 +12,8 @@
 - 永不 `rm -rf`：清理 = 移动到 `.trash/<batch-id>/`，`undo` 逐字节恢复
 - `.git` 只读：只统计体积与对象数，最多建议 `git gc`，从不执行
 
-**状态**：v0.1.0 · M5 报告与收口已落地（M1 扫描 + M2 分级 + M3 Docker 与 `.git` 审计 + M4 清理与撤销 + M5 单文件报告）。
+**状态**：v0.1.0 · M0–M5 已完成（扫描 + 分级 + Docker/`.git` 审计 + 清理与撤销 + 单文件报告）；
+M6 发布进行中（本仓库即将公开，发布留档 `plan/RELEASE-M6.md`）。
 `scan` 输出**扫描事实**（类型 / 体积 / mtime / 项目根 / 跳过原因）与**分级结论**
 （`grade` / `reason` / `evidence`，`totals.by_grade` 三级体积合计）；
 分级判定来自数据文件 `data/rules/grades.json`，引擎零硬编码规则。
@@ -43,10 +44,29 @@
 ## 安装
 
 ```bash
-pip install -e ".[dev]"
+# 建议先建干净虚拟环境（激活后用 python，别用 py 启动器——它可能指向系统 Python）
+python -m venv .venv
+# Windows: .venv\Scripts\activate    Linux/macOS: source .venv/bin/activate
+
+# Python 3.8 自带的 pip 20.2.3 无法可编辑安装 pyproject-only 项目，先升级
+python -m pip install -U pip
+
+python -m pip install -e ".[dev]"
 ```
 
 要求 Python 3.8+。运行时不安装任何第三方库；`dev` 额外组只用于跑测试。
+
+## 已知环境问题
+
+- **wheel / 非 editable 安装找不到规则表**：`data/rules/*.json` 是仓库内数据资产，不随 wheel 打包。
+  `pip install .`（非 editable）后从仓库外运行会报
+  `找不到 data/rules/types.json`（退出码 4）。首期发布物是**源码包 + editable 安装**，不受影响；
+  确实要用 wheel 时设置 `DEVDISK_DATA_DIR=<仓库>/data` 即可。本机实测两种形态都验过：
+  editable 安装从任意工作目录可跑，wheel 安装仅在设了该变量后可跑。
+- **Python 3.8 建 venv 后先升级 pip**：3.8 自带 pip 20.2.3 对 pyproject-only 项目报
+  `editable mode currently requires a setup.py based build`；升级 pip 后正常。
+- **Windows 上 `py` 启动器会绕过 venv**：`py -m pip install …` 装到系统 Python，
+  激活 venv 后请用 `python -m pip …`。
 
 ## 快速开始
 

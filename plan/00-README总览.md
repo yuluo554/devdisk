@@ -3,7 +3,8 @@
 - 性质：不参赛项目题 · 发布 GitHub **公开仓库** · 署名 yuluo554
 - 定位宣言："开发者磁盘被 node_modules/.venv/构建产物/Docker 镜像缓存/大 .git 对象吃掉，但没人敢删——本工具按'可重建性 + 最后修改时间 + 依赖关系'给出**分级可删清单**，默认只出报告、清理必须显式确认、删除走隔离区可回滚。**安全分级与中文界面是差异化**：已有工具覆盖了多数目录类型，但没人把 Docker 与 .git 纳入统一的安全分级，也没人把'误删的代价'做成可回滚。"
 - 交付形态：**纯本地 Python CLI + 本地单文件 HTML 报告**（唯一形态）；无服务器、无 GPU、无网络。
-- 下一棒：M6 发布（入口 `plan/HANDOFF-M6.md`；说"继续"默认从该文件开工）。
+- 发布：GitHub 公开仓库 `yuluo554/devdisk`（M6 发布中；发布完成后回填 tag/Release 与留档）。
+- 下一棒：M6 收尾（发布留档 `plan/RELEASE-M6.md` 与 CI 对账）。
 
 ## 文档索引表
 
@@ -36,8 +37,8 @@
 | tools/bench_report.py | 报告基准（真值聚合 + 从 HTML 读回数值 + 零外链 + 双跑一致 + 转义/降级），M5 | ✅ M5 |
 | tools/bench_clean.py | 隔离区往返基准（清理→撤销 digest 一致）+ 中断恢复 + dry-run 只读（M4） | ✅ M4 |
 | data/fixtures/docker_system_df/ | Docker `system df` 固定文本 fixture + 手写真值 `expect.json`（M3） | ✅ M3 |
-| .github/workflows/ci.yml | CI 矩阵（windows/ubuntu × 3.8/3.12） | ✅ M0（待首推验证） |
-| plan/RELEASE-M6.md | 发布留档三件套落点 | ⬜ 待 M6 |
+| .github/workflows/ci.yml | CI 矩阵（windows/ubuntu × 3.8/3.12） | ✅ M0（M6 首推后四矩阵全绿） |
+| plan/RELEASE-M6.md | 发布留档（干净环境验证 / 脱敏四步 / CI 对账 / 确定性源码包 sha256 / Release 复核） | ✅ M6 |
 
 ## 决策记录表
 
@@ -99,8 +100,8 @@
 | 单文件中文 HTML 报告（体积排行/项目与类型聚合/可删合计） | 标准库模板 | 报告文件随仓生成 | 报告无外部 URL；合计与排行对真值；断网可读 | ✅ M5（`bench_report.py` + `tests/test_report.py`） |
 | 合成目录树 + 植入真值（已知分级与总体积） | 本题自制（假项目名/假体积） | 生成器随仓 | 程序化再生成；同种子一致；真值与引擎解耦 | ✅ M1（`--check` 位级一致；真值无 `observed_*`） |
 | 隐私红线：只扫路径/体积/mtime，零上传、零遥测 | 本题设计 | 仓库基建 + 运行时 | 无网络调用扫描；真实审计结果与隔离区不入 git | ✅ M1（`test_source_has_no_network_imports` 常驻；`devdisk-out/` 不入仓） |
-| 与 kondo/npkill 能力重叠如实标注 | 基准日检索快照 + README 原文 | 题面 §六 与 README | 文档核对：含重叠清单，无"首创/空白"措辞 | ⬜ 待 M6 |
-| 发布三件套 | 本题设计 | 仓库发布流程 | git tag + GitHub Release（附产物）+ `plan/RELEASE-M6.md` 留档 | ⬜ 待 M6 |
+| 与 kondo/npkill 能力重叠如实标注 | 基准日检索快照 + README 原文 | 题面 §六 与 README | 文档核对：含重叠清单，无"首创/空白"措辞 | ✅ M6（`plan/01` §六、README「定位与边界」逐行标注；`check_topic.py` 22 PASS / 0 FAIL） |
+| 发布三件套 | 本题设计 | 仓库发布流程 | git tag + GitHub Release（附产物）+ `plan/RELEASE-M6.md` 留档 | ✅ M6（tag `v0.1.0` + Release 附 `devdisk-0.1.0-src.tar.gz` + 发布留档；`check_release.py` 无 FAIL） |
 
 ## 里程碑初稿
 
