@@ -27,6 +27,13 @@ from . import (
 
 DOCKER_COMMAND = ("docker", "system", "df")
 
+# 显式禁用 Docker 探测（CI / 无 Docker 环境的确定性降级入口）。
+# Windows 上 `docker.exe` 常登记在 `App Paths` 注册表里，查找优先级高于 PATH——
+# 仅用 PATH 隔离模拟"机器上没有 Docker"在 Windows runner 上不成立（CI 首跑实录：
+# ubuntu 两个矩阵过、windows 两个矩阵挂，同一步骤）。故提供显式开关。
+DISABLE_ENV = "DEVDISK_DISABLE_DOCKER"
+DISABLED_VALUES = ("1", "true", "yes", "on")
+
 # Docker 的类型名 → 契约字段名。顺序固定，保证同一输入产出同一 JSON。
 DOCKER_TYPES = (
     ("Images", "images"),
@@ -212,6 +219,12 @@ def parse_fixture(path):
         return parse_text(handle.read())
 
 
+def docker_disabled_by_env():
+    """环境变量显式禁用 Docker 探测（确定性降级入口，见 `DISABLE_ENV`）。"""
+    raw = (os.environ.get(DISABLE_ENV) or "").strip().lower()
+    return raw in DISABLED_VALUES
+
+
 def _missing_section(reason, status=STATUS_DOCKER_UNAVAILABLE):
     payload = {
         "status": status,
@@ -231,6 +244,9 @@ def run_docker(timeout=None):
     """
     if timeout is None:
         timeout = config.DEFAULT_DOCKER_TIMEOUT
+    if docker_disabled_by_env():
+        return _missing_section(
+            "已由环境变量 %s 显式禁用 Docker 探测。" % DISABLE_ENV)
     try:
         completed = subprocess.run(
             list(DOCKER_COMMAND),

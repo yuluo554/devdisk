@@ -77,10 +77,10 @@ jobs:
       - name: Smoke (audit docker missing degrades)
         shell: bash
         run: |
-          mkdir -p empty-bin
-          PY="$(python -c 'import sys; print(sys.executable)')"
+          # 用显式开关而不是 PATH 隔离：Windows runner 的 docker.exe 在 App Paths
+          # 注册表里，PATH 隔离排不掉它（CI 首跑实录：ubuntu 绿、windows 红）。
           set +e
-          PATH="$PWD/empty-bin" "$PY" -m devdisk audit --docker --out devdisk-out/audit-degraded.json
+          DEVDISK_DISABLE_DOCKER=1 python -m devdisk audit --docker --out devdisk-out/audit-degraded.json
           code=$?
           set -e
           test "$code" -eq 4

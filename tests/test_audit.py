@@ -147,6 +147,31 @@ def test_malformed_fixture_is_parse_error_with_excerpt():
     assert all(isinstance(line, str) for line in payload["raw_excerpt"])
 
 
+def test_missing_docker_degrades_via_explicit_switch(tmp_path, monkeypatch):
+    """显式开关 → skipped:docker_unavailable + 退出码 4（CI 用的确定性入口）。
+
+    Windows runner 的 `docker.exe` 登记在 `App Paths` 注册表里，查找优先级高于
+    PATH——只靠 PATH 隔离模拟"机器上没有 Docker"在 Windows 上不成立（CI 首跑实录：
+    ubuntu 两个矩阵绿、windows 两个矩阵同一步骤红）。故提供不依赖 PATH 的通道。
+    """
+    monkeypatch.setenv(docker_audit.DISABLE_ENV, "1")
+
+    def must_not_spawn(*args, **kwargs):
+        raise AssertionError("显式禁用时不得再 spawn 任何进程")
+
+    monkeypatch.setattr(subprocess, "run", must_not_spawn)
+    payload = docker_audit.run_docker()
+    assert payload["status"] == STATUS_DOCKER_UNAVAILABLE
+    assert docker_audit.DISABLE_ENV in payload["reason"]
+    assert payload["images"] == {"total_bytes": 0, "reclaimable_bytes": 0}
+
+    out = tmp_path / "audit.json"
+    code, stdout, _ = run_cli(["audit", "--docker", "--out", str(out)])
+    assert code == exit_codes.DEGRADED
+    assert "docker_unavailable" in stdout
+    assert out.is_file()
+
+
 def test_missing_docker_degrades_via_path_isolation(tmp_path, monkeypatch):
     """Docker 缺失 → skipped:docker_unavailable + 退出码 4（不得静默输出 0 体积）。"""
     empty_bin = tmp_path / "empty-bin"

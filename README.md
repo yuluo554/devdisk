@@ -67,6 +67,10 @@ python -m pip install -e ".[dev]"
   `editable mode currently requires a setup.py based build`；升级 pip 后正常。
 - **Windows 上 `py` 启动器会绕过 venv**：`py -m pip install …` 装到系统 Python，
   激活 venv 后请用 `python -m pip …`。
+- **想确定性地验证"Docker 缺失"降级**：Windows 的 `docker.exe` 常登记在 `App Paths`
+  注册表里，查找优先级高于 `PATH`，因此把 `PATH` 清空仍可能找到 Docker。
+  用显式开关 `DEVDISK_DISABLE_DOCKER=1` 代替（`audit --docker` 会返回
+  `skipped:docker_unavailable` 与退出码 4）。CI 用的就是这个开关。
 
 ## 快速开始
 
