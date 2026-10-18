@@ -44,8 +44,11 @@
 |---|---|---|---|
 | 类型规则表 | `data/rules/types.json` | 本项目设计（目录名 + 项目标志文件），依据 `plan/01` 模块① 与 `plan/03` 模块① | 本项目原创，随源码包分发；JSON 自带 `source` 字段 |
 | 忽略规则表 | `data/rules/ignore.txt` | 本项目设计（自定最小语法：字面名 / `*` 前缀后缀 / `/` 锚定），**非** `.gitignore` 拷贝 | 同上 |
+| 分级规则表 | `data/rules/grades.json` | 本项目设计（等级顺序、类型范围、模式组、证据源、理由模板），依据 `plan/03` 模块② 与本节 §四 第 7/8 条 | 本项目原创，随源码包分发；JSON 自带 `source` 字段与显式 `order` |
 
-> 两个规则表是类型与忽略的**唯一来源**；缺失或格式错时运行期返回退出码 4，禁止静默回退到内置默认。
+> 三个规则表是类型 / 忽略 / 分级的**唯一来源**；缺失或格式错时运行期返回退出码 4，禁止静默回退到内置默认。
+> 分级规则表里**只有数据**：等级、顺序、类型范围、文件模式、证据源名与理由模板；
+> 引擎（`grader.py` + `evidence.py`）不含任何具体规则（守门测试断言规则串不出现在引擎源码里）。
 > 合成目录树与植入真值仍是"按需生成、不入仓"（生成器：`tools/gen_synth_tree.py`）。
 
 ## 三、合成数据纪律
@@ -67,8 +70,8 @@
 4. **物理对象去重**：目录以 `(st_dev, st_ino)` 为键；文件仅对 `st_nlink > 1` 的硬链接去重。硬链接与重复挂载只计一次。Windows 上 `DirEntry.stat()` 的 `st_ino` 恒为 0，扫描器在 inode 缺失时必须退回 `os.lstat`——否则去重会静默失效。
 5. **符号链接**：`lstat` 判定；**一律不跟随**。跳过原因细分为：指向扫描根之外的目标 → `skipped:outside_root`；环形链接 → `skipped:symlink_cycle`；指向根内 → `skipped:symlink_not_followed`。Windows 上 junction（reparse point）与 symlink 同等对待，用 `symlink_kind` 区分，不按平台名分支。
 6. **最后修改时间**：取目录内文件 `mtime` 的**最大值**（目录自身 mtime 不作为依据，避免被新建/删除子项扰动）；统一以 UTC ISO-8601 输出。
-7. **分级枚举与优先级**：`forbidden`（禁止）> `caution`（谨慎）> `safe`（安全可删）。命中规则表靠前的等级即返回；无规则命中或证据不足 → `caution`（**不得默认 safe**）。
-8. **证据门槛**：`evidence` 至少 1 条才允许输出 `safe`；`forbidden` 与 `caution` 也必须给理由字符串。证据只来自路径、体积、mtime 与白名单元数据文件（`.gitignore`、`package.json`、`pyproject.toml`、`requirements.txt`、`poetry.lock`、`package-lock.json` 等）。
+7. **分级枚举与优先级**：`forbidden`（禁止）> `caution`（谨慎）> `safe`（安全可删）。命中规则表靠前的等级即返回；无规则命中或证据不足 → `caution`（**不得默认 safe**）。规则表位置与顺序**只定义一次**：`data/rules/grades.json` 的 `rules` 数组顺序即优先级（`order` 字段是同一事实的显式声明，加载时校验两者一致且等级单调）。
+8. **证据门槛**：`evidence` 至少 1 条才允许输出 `safe`；命中安全规则却取不到证据、或候选子树有读不全的目录（无法证明"纯缓存/纯依赖"）→ 降级 `caution`。`forbidden` 与 `caution` 也必须给理由字符串。证据只来自路径、体积、mtime 与白名单元数据文件（`.gitignore`、`package.json`、`pyproject.toml`、`requirements.txt`、`poetry.lock`、`package-lock.json` 等）；其中**只允许打开** `package.json`（且仅解析顶层键），其余文件只读文件名与 `stat`。证据 `path` 为相对路径（候选内→相对候选；项目根内→相对项目根；候选之外→相对扫描根）。
 9. **隔离区命名**：`.trash/<batch-id>/`，其中 `batch-id` = `YYYYMMDD-HHMMSS-<6位随机十六进制>`；隔离区必须位于被扫描根所在的同一文件系统；跨设备直接拒绝（`error:cross_device`）。
 10. **manifest 状态机**：`pending → moving → moved`，失败为 `failed:<reason>`；撤销时逆序执行 `moved → restoring → restored`，目标已存在则 `conflict` 并停止该条，不覆盖。
 11. **完整性校验**：批次移动完成后按"相对路径 + 文件字节数 + 文件内容 sha256"生成 tree digest；撤销后重新计算并与 manifest 中的值比较，必须完全一致。

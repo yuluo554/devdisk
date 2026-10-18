@@ -59,3 +59,10 @@ jobs:
 
       - name: Bench (scan vs truth, dual gate)
         run: python tools/bench_scan.py --tree devdisk-out/synth
+
+      # M2：安全分级（规则表是数据，引擎零硬编码规则）
+      - name: Bench (grade vs truth: reasons, evidence, caution fallback)
+        run: python tools/bench_grade.py --tree devdisk-out/synth
+
+      - name: Bench (grade, independent reference implementation)
+        run: python tools/reference_grade.py --tree devdisk-out/synth --scan devdisk-out/scan.json

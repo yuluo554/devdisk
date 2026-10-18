@@ -183,6 +183,39 @@ def test_rule_tables_exist_and_are_registered():
     assert "source" in payload, "规则表必须自带来源字段"
 
 
+# ------------------------------------------------------------------ M2 数据守门
+
+
+def test_grade_rules_exist_and_are_registered():
+    """分级规则表是数据资产：既要落盘，也要在 data/README 与 plan/04 登记来源。"""
+    path = os.path.join(REPO_ROOT, "data", "rules", "grades.json")
+    assert os.path.isfile(path), "data/rules/grades.json"
+
+    payload = read_text(path)
+    assert '"source"' in payload, "规则表必须自带来源字段"
+    assert '"order"' in payload, "规则表必须显式声明顺序（顺序即优先级）"
+
+    assert "data/rules/grades.json" in read_text(os.path.join(REPO_ROOT, "plan", "04-数据计划.md"))
+    assert "data/rules/grades.json" in read_text(os.path.join(REPO_ROOT, "data", "README.md"))
+
+
+def test_reference_implementation_stays_out_of_production():
+    """分层纪律（`plan/02` §三 第 3 条）：参照实现不共享、也不被生产模块 import。"""
+    for path in python_files(SRC_ROOT):
+        assert "reference_grade" not in read_text(path), path
+
+    tool = read_text(os.path.join(TOOLS_ROOT, "reference_grade.py"))
+    assert "import devdisk" not in tool
+    assert "from devdisk" not in tool
+
+
+def test_grade_rules_do_not_embed_absolute_paths():
+    """规则表是入仓数据：不得出现本机绝对路径或真实用户名。"""
+    text = read_text(os.path.join(REPO_ROOT, "data", "rules", "grades.json"))
+    pattern = re.compile(r"[A-Za-z]:[\\/]|/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/")
+    assert not pattern.search(text)
+
+
 def test_type_rules_cover_plan_04_samples():
     """样本清单里的类型必须都能在规则表里匹配到，避免样本被静默忽略。"""
     import json
@@ -234,7 +267,7 @@ def test_truth_files_never_contain_observed_fields():
 
 def test_tools_scripts_are_executable_entrypoints():
     """tools/ 下的脚本必须能被 `py tools/x.py --help` 调用（无 import 期副作用）。"""
-    for name in ("gen_synth_tree.py", "bench_scan.py"):
+    for name in ("gen_synth_tree.py", "bench_scan.py", "bench_grade.py", "reference_grade.py"):
         path = os.path.join(TOOLS_ROOT, name)
         assert os.path.isfile(path), name
         text = read_text(path)

@@ -1,0 +1,266 @@
+{
+  "schema_version": 1,
+  "source": "本项目设计；分级枚举与优先级依据 data/README.md §四 第 7/8 条，规则语义依据 plan/03-模块详设.md 模块②",
+  "generated_by": "hand-written (M2)",
+  "grades": ["forbidden", "caution", "safe"],
+  "order": [
+    "forbidden:scan_root",
+    "forbidden:git_metadata",
+    "forbidden:keep_path",
+    "forbidden:escapes_root",
+    "caution:local_state_file",
+    "caution:manual_file_after_build",
+    "caution:shared_dependency",
+    "caution:custom_venv_config",
+    "safe:pure_pyc",
+    "safe:pure_cache",
+    "safe:node_modules_deps",
+    "safe:next_build_config",
+    "safe:dist_build_config",
+    "safe:out_build_config",
+    "safe:target_build_config",
+    "safe:venv_lockfile"
+  ],
+  "sources": {
+    "scan_root": "候选路径等于任一扫描根（只读 ctx，无文件系统访问）",
+    "type_in": "候选主类型在 types 列表中（类型来自 data/rules/types.json）",
+    "path_in_keep": "候选路径命中显式保留列表（--keep / 配置 keep_paths）",
+    "escapes_root": "候选 realpath 落在所有扫描根之外（防御性检查）",
+    "dir_files_glob": "候选目录树内存在 basename 命中 patterns 的普通文件（只读文件名与 stat，不打开正文）",
+    "manual_file_newer": "候选目录树内命中 patterns 的文件 mtime 严格晚于未命中文件的最大 mtime（手工文件晚于构建产物）",
+    "link_into_candidate": "扫描的跳过记录中存在指向本候选目录的链接（symlink_not_followed），且引用方项目根与本候选不同",
+    "candidate_is_link": "候选自身是链接（symlink/junction）",
+    "extension_only": "候选目录树内全部普通文件的扩展名都在 extensions 中（且至少 1 个文件）",
+    "dir_structure": "候选目录树可完整枚举且至少 1 个文件（纯结构证据，不打开正文）",
+    "project_root_files": "候选的项目根存在 patterns 中的文件（只读文件名）",
+    "project_root_package_json_key": "候选的项目根 package.json 顶层存在 keys 中的键（白名单文件，仅解析顶层键）"
+  },
+  "patterns": {
+    "local_state": {
+      "patterns": [".env", ".env.*", "*.local", "*.pem", "*.key"],
+      "label": "本地状态/密钥文件",
+      "note": "本地状态与密钥类文件：删掉后无法从版本库恢复（plan/03 模块② 规则 5）"
+    },
+    "manual_config": {
+      "patterns": [".env", ".env.*", "*.local", "*.local.*", "*.pem", "*.key", "config.*"],
+      "label": "手工/本地配置文件",
+      "note": "构建产物目录里的手工/本地文件；配合 mtime 判定\"晚于构建产物\"（规则 6）"
+    },
+    "venv_custom": {
+      "patterns": ["*.pth", "*.cfg"],
+      "exclude_names": ["pyvenv.cfg"],
+      "exclude_prefixes": ["bin/", "Scripts/"],
+      "label": "自定义 venv 配置",
+      "note": "pyvenv.cfg 与 bin/ 下的启动脚本是包管理器生成物，不算自定义配置（规则 8）"
+    },
+    "pyc_only": {
+      "extensions": [".pyc"],
+      "label": "字节码文件",
+      "note": "__pycache__ 内的纯字节码（规则 10）"
+    }
+  },
+  "rules": [
+    {
+      "id": "forbidden:scan_root",
+      "grade": "forbidden",
+      "types": ["*"],
+      "checks": [{"source": "scan_root", "kind": "scan_root"}],
+      "reason": "禁止清理：该路径是扫描根本身（{evidence}），不是可回收的开发产物。"
+    },
+    {
+      "id": "forbidden:git_metadata",
+      "grade": "forbidden",
+      "types": ["git"],
+      "checks": [{"source": "type_in", "types": ["git"], "kind": "git_metadata"}],
+      "reason": "禁止清理：Git 版本库元数据（{evidence}），删除会摧毁提交历史；只作为只读审计对象。"
+    },
+    {
+      "id": "forbidden:keep_path",
+      "grade": "forbidden",
+      "types": ["*"],
+      "checks": [{"source": "path_in_keep", "kind": "keep_path"}],
+      "reason": "禁止清理：该路径在显式保留列表（--keep 或配置 keep_paths）中（{evidence}），按用户意图跳过。"
+    },
+    {
+      "id": "forbidden:escapes_root",
+      "grade": "forbidden",
+      "types": ["*"],
+      "checks": [{"source": "escapes_root", "kind": "escapes_root"}],
+      "reason": "禁止清理：解析后的路径越出扫描根（{evidence}），防御性拒绝。"
+    },
+    {
+      "id": "caution:local_state_file",
+      "grade": "caution",
+      "types": ["*"],
+      "checks": [{"source": "dir_files_glob", "group": "local_state", "kind": "local_state_file"}],
+      "reason": "谨慎：目录内存在本地状态或密钥文件（{evidence}），删除后无法从版本库恢复。"
+    },
+    {
+      "id": "caution:manual_file_after_build",
+      "grade": "caution",
+      "types": ["dist", "build", "out", "target", ".next"],
+      "checks": [{"source": "manual_file_newer", "group": "manual_config", "kind": "manual_file_after_build"}],
+      "reason": "谨慎：构建产物目录内存在晚于构建产物写入的手工文件（{evidence}），可能是需要保留的内容。"
+    },
+    {
+      "id": "caution:shared_dependency",
+      "grade": "caution",
+      "types": ["*"],
+      "checks": [
+        {"source": "candidate_is_link", "kind": "shared_dependency"},
+        {"source": "link_into_candidate", "kind": "shared_dependency"}
+      ],
+      "reason": "谨慎：疑似 monorepo 共享依赖（{evidence}），删除会影响其他项目。"
+    },
+    {
+      "id": "caution:custom_venv_config",
+      "grade": "caution",
+      "types": [".venv", "venv"],
+      "checks": [{"source": "dir_files_glob", "group": "venv_custom", "kind": "custom_venv_config"}],
+      "reason": "谨慎：虚拟环境内存在非包管理器生成的自定义配置（{evidence}），环境不能简单重建。"
+    },
+    {
+      "id": "safe:pure_pyc",
+      "grade": "safe",
+      "types": ["__pycache__"],
+      "checks": [{"source": "extension_only", "group": "pyc_only", "kind": "pure_pyc"}],
+      "reason": "安全可删：目录内仅有 Python 字节码缓存（{evidence}），可由源码重新生成。"
+    },
+    {
+      "id": "safe:pure_cache",
+      "grade": "safe",
+      "types": [".mypy_cache", ".pytest_cache", ".tox", ".cache"],
+      "checks": [{"source": "dir_structure", "kind": "cache_structure"}],
+      "veto": [{"source": "dir_files_glob", "group": "local_state"}],
+      "reason": "安全可删：目录是工具缓存结构（{evidence}），可由工具重新生成。"
+    },
+    {
+      "id": "safe:node_modules_deps",
+      "grade": "safe",
+      "types": ["node_modules"],
+      "checks": [
+        {
+          "source": "project_root_files",
+          "kind": "lockfile",
+          "patterns": ["package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb"],
+          "detail": "锁文件"
+        },
+        {
+          "source": "project_root_package_json_key",
+          "kind": "package_json_dependencies",
+          "keys": ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"],
+          "detail": "package.json 声明的依赖字段"
+        }
+      ],
+      "veto": [
+        {"source": "dir_files_glob", "group": "local_state"},
+        {"source": "manual_file_newer", "group": "manual_config"},
+        {"source": "link_into_candidate"},
+        {"source": "candidate_is_link"}
+      ],
+      "reason": "安全可删：依赖可由包管理器按项目清单重建（{evidence}）。"
+    },
+    {
+      "id": "safe:next_build_config",
+      "grade": "safe",
+      "types": [".next"],
+      "checks": [
+        {
+          "source": "project_root_files",
+          "kind": "next_build_config",
+          "patterns": ["package.json", "next.config.js", "next.config.mjs", "next.config.ts"],
+          "detail": "Next.js 构建配置"
+        }
+      ],
+      "veto": [
+        {"source": "dir_files_glob", "group": "local_state"},
+        {"source": "manual_file_newer", "group": "manual_config"}
+      ],
+      "reason": "安全可删：Next.js 构建产物可由项目构建配置重新生成（{evidence}）。"
+    },
+    {
+      "id": "safe:dist_build_config",
+      "grade": "safe",
+      "types": ["dist", "build"],
+      "checks": [
+        {
+          "source": "project_root_files",
+          "kind": "build_config",
+          "patterns": ["Makefile", "makefile", "GNUmakefile", "pyproject.toml", "setup.py",
+                       "vite.config.js", "vite.config.ts", "webpack.config.js", "webpack.config.ts",
+                       "rollup.config.js", "esbuild.config.js", "tsconfig.json",
+                       "build.gradle", "build.gradle.kts", "pom.xml", "CMakeLists.txt", "meson.build"],
+          "detail": "项目根构建配置"
+        },
+        {
+          "source": "project_root_package_json_key",
+          "kind": "build_scripts",
+          "keys": ["scripts"],
+          "detail": "package.json 声明的构建脚本"
+        }
+      ],
+      "veto": [
+        {"source": "dir_files_glob", "group": "local_state"},
+        {"source": "manual_file_newer", "group": "manual_config"}
+      ],
+      "reason": "安全可删：构建产物目录存在构建配置（{evidence}），可重新构建。"
+    },
+    {
+      "id": "safe:out_build_config",
+      "grade": "safe",
+      "types": ["out"],
+      "checks": [
+        {
+          "source": "project_root_package_json_key",
+          "kind": "build_scripts",
+          "keys": ["scripts"],
+          "detail": "package.json 声明的构建脚本"
+        }
+      ],
+      "veto": [
+        {"source": "dir_files_glob", "group": "local_state"},
+        {"source": "manual_file_newer", "group": "manual_config"}
+      ],
+      "reason": "安全可删：输出目录由项目构建脚本产出（{evidence}），可重新执行构建。",
+      "note": "out 的证据刻意只认 package.json scripts：Makefile/Cargo.toml 的产出目录分别是 build/target，拿它们证明 out 可重建属于误判（plan/03 模块② 规则 12）"
+    },
+    {
+      "id": "safe:target_build_config",
+      "grade": "safe",
+      "types": ["target"],
+      "checks": [
+        {
+          "source": "project_root_files",
+          "kind": "build_config",
+          "patterns": ["Cargo.toml"],
+          "detail": "Cargo 项目配置"
+        }
+      ],
+      "veto": [
+        {"source": "dir_files_glob", "group": "local_state"},
+        {"source": "manual_file_newer", "group": "manual_config"}
+      ],
+      "reason": "安全可删：Cargo 构建产物可由 Cargo.toml 重新构建（{evidence}）。"
+    },
+    {
+      "id": "safe:venv_lockfile",
+      "grade": "safe",
+      "types": [".venv", "venv"],
+      "checks": [
+        {
+          "source": "project_root_files",
+          "kind": "lockfile",
+          "patterns": ["poetry.lock", "Pipfile.lock", "uv.lock", "requirements.txt",
+                       "pyproject.toml", "Pipfile", "setup.py", "setup.cfg"],
+          "detail": "依赖清单/锁文件"
+        }
+      ],
+      "veto": [
+        {"source": "dir_files_glob", "group": "local_state"},
+        {"source": "dir_files_glob", "group": "venv_custom"},
+        {"source": "manual_file_newer", "group": "manual_config"}
+      ],
+      "reason": "安全可删：虚拟环境可由项目依赖清单重建（{evidence}）。"
+    }
+  ]
+}

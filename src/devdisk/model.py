@@ -23,6 +23,22 @@ SYMLINK_KIND_NONE = "none"
 SYMLINK_KIND_SYMLINK = "symlink"
 SYMLINK_KIND_JUNCTION = "junction"
 
+# 三级安全分级（单点定义）。顺序即优先级：forbidden > caution > safe
+# （`data/README.md` §四 第 7 条）。规则表 `data/rules/grades.json` 的 `grades`
+# 字段必须与本元组一致（加载时校验）。
+GRADE_FORBIDDEN = "forbidden"
+GRADE_CAUTION = "caution"
+GRADE_SAFE = "safe"
+GRADES = (GRADE_FORBIDDEN, GRADE_CAUTION, GRADE_SAFE)
+
+# 等级的中文展示名（单点定义；CLI 摘要、HTML 报告都引用这里，避免第二套口径）。
+GRADE_LABELS = {
+    GRADE_FORBIDDEN: "禁止",
+    GRADE_CAUTION: "谨慎",
+    GRADE_SAFE: "安全可删",
+}
+
+
 
 def utc_iso_from_ns(mtime_ns):
     """把纳秒时间戳格式化为 UTC ISO-8601（秒精度，固定 Z 结尾）。
@@ -72,10 +88,11 @@ class Skip(object):
 
 
 class Candidate(object):
-    """一条候选目录（扫描层事实）。
+    """一条候选目录。
 
-    `grade` / `reason` / `evidence` 在 M1 恒为 None / 空：
-    M1 只产出事实，M2 才填入分级结论。契约字段先占位，避免 M2 改契约。
+    `type` / `bytes` / `mtime_utc` / `project_root` 是扫描层事实；`grade` /
+    `reason` / `evidence` 由分级层（M2，`grader.py`）填入——扫描层只出事实，
+    分级层只出判定，两者都不互相回填。
     """
 
     __slots__ = ("path", "type", "bytes", "mtime_utc", "project_root",
@@ -154,14 +171,16 @@ class ScanResult(object):
         self.skipped.sort(key=lambda item: (item.path, item.reason))
 
     def totals(self):
+        """候选清单合计。`by_grade` 三级**恒在**（未分级的 0 也保留键），
+        便于报告层与"可回收体积 = safe + caution"口径直接相加（M5）。"""
         by_type = {}
-        by_grade = {}
+        by_grade = dict((grade, 0) for grade in GRADES)
         candidate_bytes = 0
         for candidate in self.candidates:
             candidate_bytes += candidate.bytes
             by_type[candidate.type] = by_type.get(candidate.type, 0) + candidate.bytes
-            if candidate.grade:
-                by_grade[candidate.grade] = by_grade.get(candidate.grade, 0) + candidate.bytes
+            if candidate.grade in by_grade:
+                by_grade[candidate.grade] += candidate.bytes
         return {
             "candidate_bytes": candidate_bytes,
             "candidate_count": len(self.candidates),

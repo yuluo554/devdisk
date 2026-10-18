@@ -2,6 +2,7 @@
 """CLI 契约测试：退出码、子命令面、骨架期语义。"""
 
 import io
+import os
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -80,6 +81,38 @@ def test_scan_missing_root_returns_usage(tmp_path):
     assert code == exit_codes.USAGE
     assert "不存在" in err
     assert "下一步" in err
+
+
+def test_scan_broken_grade_table_returns_degraded(tmp_path):
+    """分级规则表坏掉 → 退出码 4（与类型规则表同一条降级语义，不静默用默认）。"""
+    import shutil
+
+    data_dir = tmp_path / "data"
+    (data_dir / "rules").mkdir(parents=True)
+    repo_rules = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "data", "rules")
+    for name in ("types.json", "ignore.txt"):
+        shutil.copy(os.path.join(repo_rules, name), str(data_dir / "rules" / name))
+    (data_dir / "rules" / "grades.json").write_text("{not json", encoding="utf-8")
+
+    root = tmp_path / "root"
+    (root / "node_modules").mkdir(parents=True)
+    (root / "node_modules" / "a.js").write_bytes(b"x" * 16)
+
+    out, err = io.StringIO(), io.StringIO()
+    previous = os.environ.get("DEVDISK_DATA_DIR")
+    os.environ["DEVDISK_DATA_DIR"] = str(data_dir)
+    try:
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.main(["scan", str(root), "--out", str(tmp_path / "o.json"),
+                             "--min-bytes", "0"])
+    finally:
+        if previous is None:
+            os.environ.pop("DEVDISK_DATA_DIR", None)
+        else:
+            os.environ["DEVDISK_DATA_DIR"] = previous
+    assert code == exit_codes.DEGRADED
+    assert "分级" in err.getvalue()
 
 
 def test_selftest_passes_on_skeleton():

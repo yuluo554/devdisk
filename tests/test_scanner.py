@@ -77,11 +77,15 @@ def test_scan_payload_matches_contract(tmp_path):
     assert candidate["bytes"] == size
     assert candidate["project_root"] == str((root / "demo-web").resolve())
     assert candidate["is_symlink"] is False
-    assert candidate["grade"] is None  # M1 只出事实
-    assert candidate["reason"] is None
-    assert candidate["evidence"] == []
+    # 扫描事实与分级结论分列：M2 起 `grade`/`reason`/`evidence` 已落地。
+    # 本树没有锁文件、package.json 也没声明依赖 → 证据不足 → 谨慎（不允许默认 safe）。
+    assert candidate["grade"] == model.GRADE_CAUTION
+    assert candidate["reason"]
+    assert candidate["evidence"]
+    assert candidate["evidence"][0]["kind"] == "insufficient_evidence"
     assert data["totals"]["candidate_bytes"] == size
     assert data["totals"]["by_type"] == {"node_modules": size}
+    assert data["totals"]["by_grade"][model.GRADE_CAUTION] == size
 
 
 def test_scan_is_byte_identical_twice(tmp_path):

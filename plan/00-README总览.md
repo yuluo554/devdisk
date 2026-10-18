@@ -18,11 +18,15 @@
 | plan/06-交付对标与决策.md | 提交材料对标、评分对标、招牌动词表、待定决策、开放项 | ✅ v1（M0） |
 | plan/HANDOFF-M1.md | 下一棒（M1 数据先行 + 扫描）的交接快照 | ✅ M0 |
 | plan/HANDOFF-M2.md | 下一棒（M2 安全分级）的交接快照 | ✅ M1 |
+| plan/HANDOFF-M3.md | 下一棒（M3 Docker 与 .git 只读审计）的交接快照 | ✅ M2 |
 | data/README.md | 依据查证记录 + 数据源可获取性 + 合成与口径纪律 | ✅ v1 |
 | .gitignore / .gitattributes | 运行时产物不入仓；源码 LF、二进制不归一 | ✅ v1 |
 | pyproject.toml / src/ / tests/ / tools/ | 可安装骨架、CLI 契约、纪律守门 | ✅ M0 |
 | data/rules/types.json + ignore.txt | 类型规则与忽略规则（单点数据文件，M1） | ✅ M1 |
+| data/rules/grades.json | 分级规则表（等级顺序 / 类型范围 / 模式组 / 证据源 / 理由模板，单点数据文件，M2） | ✅ M2 |
+| src/devdisk/evidence.py + grader.py | 证据提取与分级引擎（引擎零硬编码规则，M2） | ✅ M2 |
 | tools/gen_synth_tree.py + tools/bench_scan.py | 合成树生成器与扫描真值基准（M1） | ✅ M1 |
+| tools/bench_grade.py + tools/reference_grade.py | 分级基准与分级规则的独立参照实现（M2） | ✅ M2 |
 | .github/workflows/ci.yml | CI 矩阵（windows/ubuntu × 3.8/3.12） | ✅ M0（待首推验证） |
 | plan/RELEASE-M6.md | 发布留档三件套落点 | ⬜ 待 M6 |
 
@@ -49,6 +53,10 @@
 | 2026-10-18 | Windows 上 junction 与 symlink 统一按"链接"处理 | 本机与 CI 的 Windows runner 都没有 `SeCreateSymbolicLinkPrivilege`；junction 具备同等"不跟随 + 可能越界"的安全语义。测试按**文件系统能力**探测并如实记录，不按平台名硬编码。 |
 | 2026-10-18 | 扫描器在 inode 缺失时退回 `os.lstat` | 实测（3.8 与 3.12）`DirEntry.stat()` 在 Windows 上 `st_ino/st_dev/st_nlink` 恒为 0，会静默禁用硬链接去重。这是正确性修复，不是可选项。 |
 | 2026-10-18 | 读不到的候选目录**不产出 0 字节条目** | 把"读不到"报成"0 字节"会让分级与报告给出错误结论；改为记 `skipped:permission_denied` 并从候选清单排除。 |
+| 2026-10-18 | **M2 落地形态**：分级规则表是数据、引擎零规则、`reason` 模板随规则表 | `data/rules/grades.json` 声明等级顺序（顺序即优先级）、类型范围、文件模式组、证据源名与理由模板；`rules.py` 只负责加载与校验，`grader.py` 只解释，`evidence.py` 只取证据。守门测试断言规则表里的类型名/模式串不出现在两个引擎模块的字符串字面量里。 |
+| 2026-10-18 | M2：安全结论必须过**证据门槛**（无证据或子树读不全 → 谨慎） | 与"读不到不给结论"同源：证明不了"纯缓存/纯依赖"就不能宣称可安全删除。变异验证：摘掉该分支 → 常驻门变红。 |
+| 2026-10-18 | M2：`totals.by_grade` 三级键恒在，`forbidden` 不计入可回收体积 | 报告层要直接相加三级体积；`.git` 这类禁止项只做只读审计对象，永不进入"可删合计"。 |
+| 2026-10-18 | M2：分级另做一份**独立参照实现**（`tools/reference_grade.py`） | 引擎与自己的测试同源会掩盖错误；参照实现候选清单取自植入真值、规则逻辑另行抄写、禁止 import 生产模块，逐样本对账。 |
 
 ## 承诺-证据台账
 
@@ -58,8 +66,8 @@
 |---|---|---|---|---|
 | 多类型扫描与分类（node_modules/dist/build/.venv/__pycache__/.mypy_cache/.tox/.next/.cache/target/out 等） | Python 标准库 `os.scandir`；类型规则表随包 | 纯本地，无外部服务 | 合成树基准：类型识别与体积合计对真值 | ✅ M1（`bench_scan.py` 18/18 检出、0 误判、逐项 0 差异） |
 | 符号链接不跟随、不越界、不重复计数 | `entry.is_symlink()` + reparse 判定 + `(st_dev, st_ino)` 去重 | 运行时逻辑 | 符号链接与环形链接负样本；扫描根外目标断言被跳过 | ✅ M1（越界记 `outside_root`、环记 `symlink_cycle`、硬链接去重有专门用例） |
-| 三级安全分级（安全可删/谨慎/禁止） | 本题设计；证据来自目录结构、mtime、白名单元数据文件 | 运行时逻辑 | 分级基准：与植入真值一致；证据不足落"谨慎" | ⬜ 待 M2 |
-| 分级理由与证据可解释（非裸标签） | 本题设计 | CLI 输出与 HTML 报告均展示 | 每条断言 `reason` 非空且 `evidence` ≥ 1 条 | ⬜ 待 M2 |
+| 三级安全分级（安全可删/谨慎/禁止） | 本题设计；判定规则在 `data/rules/grades.json`；证据来自目录结构、mtime、白名单文件名 | 运行时逻辑 | 分级基准：与植入真值逐样本一致（18/18）；证据不足落"谨慎"；独立参照实现对账一致 | ✅ M2（`bench_grade.py` 18/18、逐项差异 0；`reference_grade.py` PASS） |
+| 分级理由与证据可解释（非裸标签） | 本题设计 | CLI 摘要、JSON 输出的 `reason`/`evidence` 字段（M5 报告沿用） | 每条候选断言 `reason` 非空且 `evidence` ≥ 1 条；证据 `path` 为相对路径，不泄漏绝对路径 | ✅ M2（常驻不变量门 + `bench_grade.py` 证据门） |
 | Docker 只读审计（`docker system df` 解析四类体积） | Docker CLI 可选增强 | 缺失时 `skipped:docker_unavailable` 降级 | fixture 基准：解析正确；无 prune 调用；`applied: false` | ⬜ 待 M3 |
 | `.git` 只读审计（objects 体积、pack 数、loose 数） | 文件系统统计；不调用 git 写操作 | 纯本地 | 合成仓库基准：数值正确；审计前后 `.git` 元数据不变 | ⬜ 待 M3 |
 | `.git` 永不自动处理、只建议 `git gc` | 产品纪律 | 代码层无删除/gc 调用；输出标注 `applied: false` | 静态扫描：无 `git gc`/`git prune` 执行；动态：仓库无变化 | ⬜ 待 M3 |
@@ -77,7 +85,7 @@
 |---|---|---|
 | **M0 计划与骨架** | `plan/00–06` 定稿 + 可安装骨架（`pyproject` / `src/devdisk` / `tests` / CI） | 六份文档齐备；`pip install -e .` 可用；`--version`/`--help`/`selftest` 可跑；退出码契约锁进测试；双解释器 pytest 绿；`check_topic.py` 0 FAIL |
 | M1 数据先行 | 合成目录树生成器（假项目名/假体积，含软链、环形链、共享 node_modules、构建后手工文件、大 `.git` objects 等样本）+ 植入真值台账；扫描与分类层（类型规则、`(dev, ino)` 去重、跳过符号链接、跳过原因落库） | 真值可程序化再生成且同种子一致；1000 个候选目录扫描不崩；软链不越界；两次扫描输出一致 |
-| M2 安全分级 | 三级规则表、证据提取（白名单元数据文件）、理由字符串、证据不足降级 | 每条候选有非空 `reason` 与 ≥1 条 `evidence`；分级与真值一致；证据不足全部落"谨慎" |
+| M2 安全分级 | 三级规则表（数据文件）、证据提取（白名单文件名与 `stat`）、理由字符串、证据门槛降级、独立参照实现 | 每条候选有非空 `reason` 与 ≥1 条 `evidence`；分级与真值逐样本一致；证据不足全部落"谨慎"；摘掉降级分支测试变红 |
 | M3 只读审计 | Docker `system df` 解析与降级语义；`.git` objects/pack/loose 统计与 `git gc` 建议；`applied: false` 贯穿输出 | Docker fixture 解析正确；缺失时退出码进入降级语义；`.git` 审计前后元数据不变；无 prune/gc 执行 |
 | M4 隔离与回滚 | `.trash/<batch-id>/`、manifest 状态机、dry-run 默认、`undo` 逆序移回、中断恢复 | 撤销后 tree digest 一致；中断可恢复；无 `rm -rf`；隔离区不入 git |
 | M5 报告 | 单文件中文 HTML：排行、项目/类型聚合、可删合计、分级理由、Docker/.git 段、降级说明 | 无外部 URL；断网可读；合计与排行对真值；降级说明可见 |

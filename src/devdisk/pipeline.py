@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """编排层：CLI 与测试共用同一组公开函数。
 
-M1 只落地 `run_scan()`；后续里程碑按 `plan/03` 追加 `run_grade()` / `run_audit()` 等。
-纪律：本层不含分级判定（M2）也不做 HTML 渲染（M5），只做"校验输入 → 调用下层 →
-组装契约 → 写盘"。
+`plan/03` 的模块间数据流：`roots --scan--> 候选清单 --grade--> 带分级的候选清单`。
+M1 落地 `run_scan()`，M2 追加 `run_grade()` 并由 `run_scan()` 直接串联（CLI 一次
+调用就拿到带分级的清单；测试也走同一入口，不存在第二份判定逻辑）。
+
+纪律：本层不含分级判定（在 `grader.py`）也不做 HTML 渲染（M5），只做
+"校验输入 → 调用下层 → 组装契约 → 写盘"。
 """
 
 import csv
@@ -14,7 +17,8 @@ from . import __version__
 from . import config
 from . import exit_codes
 from . import model
-from .rules import RulesError, load_rules
+from .grader import grade_result, make_context
+from .rules import RulesError, load_grade_rules, load_rules
 from .scanner import Scanner
 from .serialize import write_json_atomic, write_text_atomic
 
@@ -90,6 +94,61 @@ def render_csv(payload):
     return buffer.getvalue()
 
 
+def _load_grade_table(data_dir):
+    """加载分级规则表；缺失/格式错 → 退出码 4（不静默用内置默认）。"""
+    try:
+        return load_grade_rules(data_dir)
+    except RulesError as exc:
+        raise ScanError(str(exc), exit_code=exit_codes.DEGRADED)
+
+
+def run_grade(result, keep_paths=None, data_dir=None, config_path=None):
+    """对已扫描的 `ScanResult` 就地分级，返回 (exit_code, stats, summary_lines)。
+
+    这是"分级"这一步的公开入口（CLI 的 `scan` 内部也走同一函数）：
+    `run_scan()` = `scanner.scan()` + `run_grade()` 的串联。
+    """
+    if config_path is not None and data_dir is None:
+        try:
+            settings = config.load_config(config_path)
+        except config.ConfigError as exc:
+            raise ScanError(str(exc))
+        data_dir = config.data_dir(settings)
+
+    table = _load_grade_table(data_dir)
+    stats = grade_result(result, table, keep_paths=keep_paths,
+                         context=make_context(result, keep_paths=keep_paths))
+    result.finalize()
+    return exit_codes.OK, stats, grade_summary_lines(result)
+
+
+def grade_summary_lines(result):
+    """分级摘要（中文、人类可读）：三级计数与体积。"""
+    counts = {}
+    bytes_by_grade = {}
+    for candidate in result.candidates:
+        counts[candidate.grade] = counts.get(candidate.grade, 0) + 1
+        bytes_by_grade[candidate.grade] = \
+            bytes_by_grade.get(candidate.grade, 0) + candidate.bytes
+    return [_grade_line(counts, bytes_by_grade)]
+
+
+def _grade_line(counts, bytes_by_grade):
+    parts = []
+    for grade in model.GRADES:
+        parts.append("%s %d 个（%s）"
+                     % (model.GRADE_LABELS[grade], counts.get(grade, 0),
+                        format_bytes(bytes_by_grade.get(grade, 0))))
+    return "分级：" + "；".join(parts) + "；禁止项不计入可回收体积"
+
+
+def _grade_line_from_payload(payload):
+    counts = {}
+    for candidate in payload["candidates"]:
+        counts[candidate["grade"]] = counts.get(candidate["grade"], 0) + 1
+    return _grade_line(counts, payload["totals"].get("by_grade") or {})
+
+
 def run_scan(roots, out=None, output_format="json", min_bytes=None,
              keep_paths=None, data_dir=None, config_path=None):
     """扫描并返回 (exit_code, payload, summary_lines)。
@@ -126,6 +185,11 @@ def run_scan(roots, out=None, output_format="json", min_bytes=None,
 
     scanner = Scanner(type_rules, ignore_rules, min_bytes=threshold)
     result = scanner.scan(normalized)
+    # 扫描与分级在同一次调用里串起来（`plan/03` 模块间数据流）；
+    # 分级失败的降级语义与规则表坏掉一致：退出码 4，不静默降级。
+    table = _load_grade_table(data_dir)
+    grade_result(result, table, keep_paths=effective_keep,
+                 context=make_context(result, keep_paths=effective_keep))
     payload = build_payload(result)
 
     if effective_keep:
@@ -156,6 +220,7 @@ def _summary_lines(payload, threshold, out=None):
     lines.append("候选目录：%d 个，合计 %s（%d 字节）"
                  % (totals["candidate_count"], format_bytes(totals["candidate_bytes"]),
                     totals["candidate_bytes"]))
+    lines.append(_grade_line_from_payload(payload))
     if totals["by_type"]:
         parts = ["%s %s" % (name, format_bytes(size))
                  for name, size in sorted(totals["by_type"].items())]

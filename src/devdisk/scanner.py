@@ -324,40 +324,55 @@ class Scanner(object):
 
     def _find_project_root(self, root, path):
         """从候选目录向上找最近的标志文件所在目录，不越过扫描根。"""
-        directory = os.path.dirname(os.path.abspath(path))
-        root = os.path.abspath(root)
-        chain = []
-        current = directory
-        while True:
-            chain.append(current)
-            if os.path.normcase(current) == os.path.normcase(root):
-                break
-            parent = os.path.dirname(current)
-            if parent == current or not _is_inside(parent, root):
-                break
-            current = parent
+        result = find_project_root(root, path, cache=self._project_root_cache)
+        if result is not None:
+            self._project_root_cache[result] = result
+        return result
 
-        for item in chain:
-            cached = self._project_root_cache.get(item)
+
+def find_project_root(root, path, cache=None):
+    """从 `path` 所在目录向上找最近的标志文件所在目录，不越过 `root`；找不到返回 None。
+
+    分级层（M2）要用同一口径判断"引用方项目根"，因此这里是单一实现点，
+    `Scanner._find_project_root` 只是带缓存的薄封装。
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    root = os.path.abspath(root)
+    chain = []
+    current = directory
+    while True:
+        chain.append(current)
+        if os.path.normcase(current) == os.path.normcase(root):
+            break
+        parent = os.path.dirname(current)
+        if parent == current or not _is_inside(parent, root):
+            break
+        current = parent
+
+    for item in chain:
+        if cache is not None:
+            cached = cache.get(item)
             if cached is not None:
                 return cached
-            if self._has_project_marker(item):
-                self._project_root_cache[item] = item
-                return item
-        return None
+        if _has_project_marker(item):
+            if cache is not None:
+                cache[item] = item
+            return item
+    return None
 
-    def _has_project_marker(self, directory):
-        try:
-            with os.scandir(fs_path(directory)) as entries:
-                for entry in entries:
-                    try:
-                        if entry.is_file(follow_symlinks=False) and is_project_marker(entry.name):
-                            return True
-                    except OSError:
-                        continue
-        except OSError:
-            return False
+
+def _has_project_marker(directory):
+    try:
+        with os.scandir(fs_path(directory)) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_file(follow_symlinks=False) and is_project_marker(entry.name):
+                        return True
+                except OSError:
+                    continue
+    except OSError:
         return False
+    return False
 
 
 def _inode_key(st):

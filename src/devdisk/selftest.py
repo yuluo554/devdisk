@@ -2,9 +2,11 @@
 """自检：交付态可用性的一条命令。
 
 `devdisk selftest` 必须可证伪——任一不变量被破坏即返回非 0。
-M0 阶段校验工程骨架不变量；M1 起追加数据层不变量（规则表可加载、scan 已退役 NOT_READY）。
+M0 校验工程骨架不变量；M1 追加数据层不变量（类型/忽略规则表可加载、scan 已退役）；
+M2 追加分级层不变量（分级规则表可加载、`.git` 必为禁止、无证据必为谨慎）。
 """
 
+import os
 import sys
 
 from . import __version__
@@ -49,6 +51,7 @@ def run_selftest(parser):
 
     problems.extend(_check_retired())
     problems.extend(_check_rules())
+    problems.extend(_check_grade_rules())
 
     if problems:
         for problem in problems:
@@ -98,4 +101,46 @@ def _check_rules():
     # ignore 可为空集合；这里只验证对象可用。
     if ignore is None:
         problems.append("忽略规则对象缺失")
+    return problems
+
+
+def _check_grade_rules():
+    """M2 不变量：分级规则表可加载，且两条底线成立（`.git` 禁止 / 无证据谨慎）。
+
+    用"合成候选"直接问引擎，不依赖任何真实磁盘内容——自检必须能在干净 clone
+    里离线跑通。候选路径刻意取不存在的位置，避免触碰真实 `.git`。
+    """
+    from . import model
+    from .grader import Grader, make_context
+    from .rules import RulesError, load_grade_rules
+
+    problems = []
+    try:
+        table = load_grade_rules()
+    except RulesError as exc:
+        return ["分级规则表不可加载：%s" % exc]
+
+    if table.grades != list(model.GRADES):
+        problems.append("分级规则表 grades 与口径不一致：%r" % (table.grades,))
+    if not table.rules:
+        problems.append("分级规则表为空")
+
+    grader = Grader(table, make_context(model.ScanResult([])))
+
+    probe = os.path.join(os.path.abspath(os.curdir), "__devdisk_selftest_probe__")
+    git_like = model.Candidate(path=os.path.join(probe, ".git"), type="git", bytes=1,
+                               mtime_utc=None, project_root=None)
+    grade, reason, evidence = grader.grade(git_like)
+    if grade != model.GRADE_FORBIDDEN:
+        problems.append("分级规则表未把 `git` 类型判为禁止（实际 %s）" % grade)
+    if not reason or not evidence:
+        problems.append(".git 的禁止结论缺少理由或证据")
+
+    unknown = model.Candidate(path=os.path.join(probe, "unknown"), type="unknown-type",
+                              bytes=1, mtime_utc=None, project_root=None)
+    grade, reason, evidence = grader.grade(unknown)
+    if grade != model.GRADE_CAUTION:
+        problems.append("未命中任何规则时未落谨慎（实际 %s）" % grade)
+    if not reason or not evidence:
+        problems.append("证据不足结论缺少理由或证据")
     return problems
