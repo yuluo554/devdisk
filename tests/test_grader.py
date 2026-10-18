@@ -522,6 +522,21 @@ def test_reason_strings_do_not_leak_absolute_paths(graded):
             assert tree not in item["detail"], candidate["path"]
 
 
+def test_reason_strings_never_contain_file_body_content(graded):
+    """理由/证据只由路径、体积、mtime、白名单文件名组成，不含任何文件正文片段。
+
+    用合成树里几个**只在正文里出现**的标记串做反证：`.env` 的 `API_BASE`、
+    `Makefile` 的 `cargo build`、锁文件的 `lockfileVersion`、`pyproject.toml` 的 `[project]`。
+    它们一旦出现在理由里，就说明"读了正文"。
+    """
+    body_markers = ("API_BASE", "cargo build", "lockfileVersion", "[project]")
+    for candidate in graded["payload"]["candidates"]:
+        text = candidate["reason"] + "".join(
+            item["detail"] + item["path"] for item in candidate["evidence"])
+        for marker in body_markers:
+            assert marker not in text, (candidate["path"], marker, text)
+
+
 # ------------------------------------------------------------------ 工具门
 
 

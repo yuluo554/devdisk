@@ -20,15 +20,22 @@
 
 | 通道 | 命令 | 结果 |
 |---|---|---|
-| 3.12 | `py -3.12 -m pytest -q` | 全绿（107 collected） |
-| 3.8 | `py -3.8 -m pytest -q` | 全绿（107 collected） |
+| 3.12 | `py -3.12 -m pytest -q` | 全绿（108 collected） |
+| 3.8 | `py -3.8 -m pytest -q` | 全绿（108 collected） |
 | 生成器 | `gen_synth_tree.py --out devdisk-out/synth --seed 20261018 --check` | exit 0（位级一致） |
 | 扫描基准（M1 门复跑） | `bench_scan.py --tree devdisk-out/synth` | exit 0（检出 18/18、误判 0、逐项差异 0） |
 | 分级基准 | `bench_grade.py --tree devdisk-out/synth` | exit 0（分级 18/18、证据缺失 0、逐项差异 0） |
 | 独立参照 | `reference_grade.py --tree devdisk-out/synth --scan devdisk-out/scan.json` | exit 0（对账 18 样本、不一致 0） |
 | 自检 | `devdisk selftest` | exit 0（含 M2 分级不变量） |
-| 变异验证（M2 新增） | 删掉"证据不足降级"分支（`grader._finalize` 改成原样返回） | **必红**：常驻门报告"evidence 少于 1 条"（`tests/test_grader.py::test_mutation_removing_evidence_gate_turns_red`） |
-| 变异验证（M2 新增） | 摘掉"读不全就不给 safe"分支 | **结论改变**：`caution` → `safe`（`test_mutation_removing_unreadable_guard_changes_conclusion`） |
+| 变异验证（M2 新增） | 删掉"证据不足降级"分支（`grader._finalize` 改成原样返回） | **必红**：常驻门报告"evidence 少于 1 条"（`tests/test_grader.py::test_mutation_removing_evidence_gate_turns_red`）；源码级实测同轮红 4 项 |
+| 变异验证（M2 新增） | 摘掉"读不全就不给 safe"分支（`or unreadable` 去掉） | **必红**：`test_unreadable_subtree_refuses_safe` + 变异锚点用例红 2 项 |
+| 变异验证（源码级） | 从 `safe:dist_build_config` 删掉 `package.json scripts` 证据源 | **必红**：`bench_grade` 17/18（`demo-web/dist` 期望 safe / 实际 caution）+ pytest 3 项红 |
+| 变异验证（源码级） | 摘掉 `evidence._read_json_keys` 的 open 白名单并顺手读项目根文件正文 | **必红**：`test_evidence_never_opens_non_whitelisted_files` |
+| 变异验证（源码级） | `grades.json` 的 `order` 与 `rules` 数组不一致 | **必红**：载入期 `RulesError` → `bench_grade` 退出码 1（退出码 4 语义） |
+| 变异验证（源码级） | `totals.by_grade` 退回稀疏（三键缺失） | **必红**：`test_totals_by_grade_always_has_three_keys` + `bench_grade`（合计不闭合） |
+| 变异验证（M1 门复跑） | 硬链接不去重（`st_nlink > 1` 分支失效） | **必红**：`test_hardlink_counted_once`（200 ≠ 100） |
+| 变异验证（M1 门复跑） | 生成器真值 `expected_bytes` 偏 1 | **必红**：`test_synth_tree_matches_truth` |
+| 变异验证（**非假门发现**） | 只从 `local_state` 模式组删掉 `.env` | **不会变红**（不是漏网）：同一份 `.env` 仍被 `manual_config` 组 + `node_modules` 规则的 `veto` 拦住 → 结论依旧是 `caution`，属于刻意的双重覆盖；改表时若想真正改判定，必须同时动两组（`test_patterns_come_from_the_rule_table` 就是这么做的） |
 
 **M2 实测得到的本机结论（务必带走）**：
 
@@ -117,4 +124,5 @@ devdisk selftest
 - CI 从未实际运行：workflow 已含 M1 四步 + M2 两步（`bench_grade` / `reference_grade`），**"CI 绿"目前不成立**，只能写"本地等价校验 + 待首推验证"。
 - `M2-5` 的"只打开 `package.json`"是**运行期断言**（monkeypatch `open` 记录），不是静态证明；新增证据源时该测试会立刻发现越界。
 - 权限拒绝样本在本机 Windows 无法构造；"读不全就不给 safe"的用例用 monkeypatch `os.scandir` 模拟，**真实 chmod 000 场景要在 ubuntu CI 上确认**。
+- M2 的变异验证里，M1 变异表只复跑了 2 条（硬链接去重、真值 bytes 偏 1）作为回归抽查——本次改动了 `scanner.py`（抽出 `find_project_root`）与 `rules.py`（新增分级表加载）。M1 的另外 6 条仍按 `plan/05` M1 行的留档口径有效，但**未在 M2 重跑**。
 - 尚无远端仓库：M6 才建仓；在此之前所有 push/CI 相关项一律按"未发生"处理。
