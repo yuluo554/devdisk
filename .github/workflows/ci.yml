@@ -151,7 +151,7 @@ jobs:
         run: python tools/bench_clean.py --tree devdisk-out/synth
 
       # M5：单文件 HTML 报告（零外链、数值对真值、双跑一致、转义与降级可见）
-      - name: Smoke (report offline: single-file HTML, zero external refs)
+      - name: "Smoke (report offline: single-file HTML, zero external refs)"
         shell: bash
         run: |
           set -e
