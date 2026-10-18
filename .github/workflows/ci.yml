@@ -66,3 +66,24 @@ jobs:
 
       - name: Bench (grade, independent reference implementation)
         run: python tools/reference_grade.py --tree devdisk-out/synth --scan devdisk-out/scan.json
+
+      # M3：只读审计（Docker fixture 为验收主路径；`.git` 只做文件系统统计）
+      - name: Smoke (audit offline: fixture + synth .git)
+        run: >
+          python -m devdisk audit --root devdisk-out/synth --git
+          --docker-fixture data/fixtures/docker_system_df/v24_standard.txt
+          --out devdisk-out/audit.json
+
+      - name: Smoke (audit docker missing degrades)
+        shell: bash
+        run: |
+          mkdir -p empty-bin
+          PY="$(command -v python)"
+          set +e
+          PATH="$PWD/empty-bin" "$PY" -m devdisk audit --docker --out devdisk-out/audit-degraded.json
+          code=$?
+          set -e
+          test "$code" -eq 4
+
+      - name: Bench (audit: docker fixtures + synth .git)
+        run: python tools/bench_audit.py --tree devdisk-out/synth

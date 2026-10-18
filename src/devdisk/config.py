@@ -132,3 +132,18 @@ def configured_keep_paths(settings):
 
 def data_dir(settings):
     return _lookup(settings, "scan.data_dir", "data_dir")
+
+
+def git_gc_loose_threshold(settings):
+    value = _lookup(settings, "audit.git_gc_loose_threshold", "git_gc_loose_threshold")
+    return DEFAULT_GIT_GC_LOOSE_THRESHOLD if value is None else int(value)
+
+
+def git_gc_bytes_threshold(settings):
+    value = _lookup(settings, "audit.git_gc_bytes_threshold", "git_gc_bytes_threshold")
+    return DEFAULT_GIT_GC_BYTES_THRESHOLD if value is None else int(value)
+
+
+def docker_timeout(settings):
+    value = _lookup(settings, "audit.docker_timeout", "docker_timeout")
+    return DEFAULT_DOCKER_TIMEOUT if value is None else int(value)

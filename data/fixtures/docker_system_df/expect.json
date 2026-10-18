@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "source": "手写：按 fixture 文本逐列换算（1024 进制），不由解析器回填",
+  "cases": [
+    {
+      "file": "v24_standard.txt",
+      "status": "ok",
+      "images": {"total_bytes": 1610612736, "reclaimable_bytes": 1073741824},
+      "containers": {"total_bytes": 13107200, "reclaimable_bytes": 0},
+      "volumes": {"total_bytes": 262144000, "reclaimable_bytes": 131072000},
+      "build_cache": {"total_bytes": 536870912, "reclaimable_bytes": 536870912},
+      "suggestion_commands": [
+        "docker image prune",
+        "docker volume prune",
+        "docker builder prune"
+      ]
+    },
+    {
+      "file": "v20_standard.txt",
+      "status": "ok",
+      "images": {"total_bytes": 1324997410, "reclaimable_bytes": 478884659},
+      "containers": {"total_bytes": 12595, "reclaimable_bytes": 0},
+      "volumes": {"total_bytes": 838860800, "reclaimable_bytes": 629145600},
+      "build_cache": {"total_bytes": 1288490188, "reclaimable_bytes": 1288490188},
+      "suggestion_commands": [
+        "docker image prune",
+        "docker volume prune",
+        "docker builder prune"
+      ]
+    },
+    {
+      "file": "empty.txt",
+      "status": "ok",
+      "images": {"total_bytes": 0, "reclaimable_bytes": 0},
+      "containers": {"total_bytes": 0, "reclaimable_bytes": 0},
+      "volumes": {"total_bytes": 0, "reclaimable_bytes": 0},
+      "build_cache": {"total_bytes": 0, "reclaimable_bytes": 0},
+      "suggestion_commands": []
+    },
+    {
+      "file": "malformed.txt",
+      "status": "error:docker_parse",
+      "raw_excerpt_limit": 20
+    }
+  ]
+}

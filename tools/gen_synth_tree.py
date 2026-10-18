@@ -117,6 +117,8 @@ class TreeBuilder(object):
         self.scale_samples = []
         self.link_kinds = {}
         self.links = {}
+        self.git_repos = []
+        self.gitdir_files = []
 
     # ---------------------------------------------------------------- 写入
 
@@ -219,6 +221,20 @@ class TreeBuilder(object):
         if note:
             entry["note"] = note
         self.skipped_expect.append(entry)
+
+    def git_repo(self, git_rel_path, pack_sizes, loose_sizes, note=""):
+        """登记一个 `.git` 目录的审计真值（由"写入时声明的字节数"累加）。"""
+        self.git_repos.append({
+            "rel_path": git_rel_path,
+            "expected_objects_bytes": sum(pack_sizes) + sum(loose_sizes),
+            "expected_pack_files": len(pack_sizes),
+            "expected_loose_objects": len(loose_sizes),
+            "note": note,
+        })
+
+    def gitdir_file(self, rel_path, target):
+        """登记 worktree/submodule 的 `.git` 文件（审计只记目标，不跟随）。"""
+        self.gitdir_files.append({"rel_path": rel_path, "gitdir": target})
 
     # ------------------------------------------------------------ 收尾设定
 
@@ -450,17 +466,39 @@ def build_demo_infra(builder):
                    project_root_rel="demo-infra")
 
     # 样本 20：大 .git objects（只读审计样本）
+    # 形态刻意覆盖：多个 pack（只算 `.pack`、不算 `.idx`）、两个 loose 十六进制目录、
+    # 以及必须被排除的 `objects/info`。
+    pack_sizes = []
     builder.add_dir("demo-infra/.git/objects/pack", base + 40)
     builder.add_file("demo-infra/.git/objects/pack/pack-0001.pack", 3 * 1024 * 1024, base + 41)
+    pack_sizes.append(3 * 1024 * 1024)
     builder.add_file("demo-infra/.git/objects/pack/pack-0001.idx", 8 * 1024, base + 42)
-    builder.add_dir("demo-infra/.git/objects/ab", base + 43)
-    builder.add_file("demo-infra/.git/objects/ab/cdef0123456789", 4096, base + 44)
-    builder.add_text("demo-infra/.git/HEAD", "ref: refs/heads/main\n", base + 45)
+    builder.add_file("demo-infra/.git/objects/pack/pack-0002.pack", 1024 * 1024, base + 43)
+    pack_sizes.append(1024 * 1024)
+    builder.add_file("demo-infra/.git/objects/pack/pack-0002.idx", 4 * 1024, base + 44)
+    loose_sizes = []
+    builder.add_dir("demo-infra/.git/objects/ab", base + 45)
+    builder.add_file("demo-infra/.git/objects/ab/cdef0123456789", 4096, base + 46)
+    loose_sizes.append(4096)
+    builder.add_dir("demo-infra/.git/objects/cd", base + 47)
+    builder.add_file("demo-infra/.git/objects/cd/00112233445566", 512, base + 48)
+    loose_sizes.append(512)
+    builder.add_dir("demo-infra/.git/objects/info", base + 49)
+    builder.add_file("demo-infra/.git/objects/info/packs", 64, base + 50)
+    builder.add_text("demo-infra/.git/HEAD", "ref: refs/heads/main\n", base + 51)
     builder.add_text("demo-infra/.git/config",
-                     '[core]\n\trepositoryformatversion = 0\n', base + 46)
+                     '[core]\n\trepositoryformatversion = 0\n', base + 52)
     builder.sample("demo-infra/.git", "git", "forbidden",
                    ["git_metadata"], "版本历史元数据；只读，永不删除",
                    project_root_rel="demo-infra")
+    builder.git_repo("demo-infra/.git", pack_sizes, loose_sizes,
+                     note="objects/info/packs 与 *.idx 不得计入")
+
+    # M3：worktree/submodule 形态（`.git` 是文件而不是目录）。文件本身不是候选，
+    # 因此不影响扫描真值；审计必须记 `skipped:gitdir_file` 且不跟随统计。
+    builder.add_text("demo-infra/app/.git",
+                     "gitdir: ../../.git/worktrees/app\n", base + 60)
+    builder.gitdir_file("demo-infra/app/.git", "../../.git/worktrees/app")
 
 
 def build_root_sample(builder):
@@ -501,6 +539,8 @@ def build_tree(out_dir, seed):
         "scale_samples": builder.scale_samples,
         "skipped_expect": builder.skipped_expect,
         "link_kinds": builder.link_kinds,
+        "git_repos": builder.git_repos,
+        "gitdir_files": builder.gitdir_files,
         "counts": {
             "sample_dirs": len(builder.samples),
             "files": len(builder.files),

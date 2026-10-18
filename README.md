@@ -12,11 +12,12 @@
 - 永不 `rm -rf`：清理 = 移动到 `.trash/<batch-id>/`，`undo` 逐字节恢复
 - `.git` 只读：只统计体积与对象数，最多建议 `git gc`，从不执行
 
-**状态**：v0.1.0 · M2 安全分级已落地（合成树生成器 + 植入真值 + `scan` 带分级输出）。
+**状态**：v0.1.0 · M3 只读审计已落地（M1 扫描 + M2 分级 + M3 Docker 与 `.git` 审计）。
 `scan` 输出**扫描事实**（类型 / 体积 / mtime / 项目根 / 跳过原因）与**分级结论**
 （`grade` / `reason` / `evidence`，`totals.by_grade` 三级体积合计）；
 分级判定来自数据文件 `data/rules/grades.json`，引擎零硬编码规则。
-`audit` / `clean` / `undo` / `report` 仍返回退出码 `3`（未就绪），退役表见 `plan/05-里程碑与发布.md` §三。
+`audit` 输出 Docker 四类体积与 `.git` 对象统计（只读；建议命令固定 `applied: false`）。
+`clean` / `undo` / `report` 仍返回退出码 `3`（未就绪），退役表见 `plan/05-里程碑与发布.md` §三。
 
 ## 定位与边界（如实说明）
 
@@ -52,8 +53,11 @@ devdisk --help
 # 扫描并分级（M1 起可用；M2 起输出带 grade/reason/evidence）
 devdisk scan ~/code --out devdisk-out/scan.json
 
-# 只读审计 Docker 与 .git（M3 落地后可用）
+# 只读审计 Docker 与 .git（M3 起可用）
 devdisk audit --root ~/code --docker --git --out devdisk-out/audit.json
+
+# 离线复跑解析：用固定文本 fixture 代替真实 Docker（验收主路径）
+devdisk audit --docker-fixture data/fixtures/docker_system_df/v24_standard.txt --out devdisk-out/audit.json
 
 # 生成单文件中文报告（M5 落地后可用）
 devdisk report --input devdisk-out/scan.json --audit devdisk-out/audit.json --html devdisk-out/report.html
@@ -72,7 +76,7 @@ devdisk undo 20261018-120000-a1b2c3
 | 命令 | 作用 | 关键参数 |
 |---|---|---|
 | `devdisk scan <root>...` | 扫描并分级（M1 起扫描，M2 起带分级） | `--out`、`--format json/csv`、`--min-bytes`、`--keep`、`--config` |
-| `devdisk audit` | Docker / `.git` 只读审计 | `--root`（可重复）、`--docker`、`--git`、`--out` |
+| `devdisk audit` | Docker / `.git` 只读审计 | `--root`（可重复）、`--docker`、`--docker-fixture`、`--git`、`--out`、`--config` |
 | `devdisk clean` | 选中项移入隔离区 | `--from`、`--select`（可重复）、`--apply`、`--yes`、`--trash` |
 | `devdisk undo <batch-id>` | 按 manifest 逆序移回 | `--trash`、`--yes` |
 | `devdisk report` | 生成单文件 HTML 报告 | `--input`、`--audit`、`--html`、`--top` |
@@ -97,13 +101,17 @@ devdisk undo 20261018-120000-a1b2c3
 - **撤销校验**：移动前后计算 tree digest（相对路径 + 字节数 + 文件 sha256），不一致即报冲突。
 - **`.git` 只读**：不删除、不移动、不执行 `git gc`；审计前后对 `.git` 做元数据快照并断言未变化。
 - **Docker 只读**：只调用 `docker system df`；清理命令只生成，固定 `applied: false`。
+  Docker 缺失/超时 → `skipped:docker_unavailable` / `skipped:docker_timeout`（退出码 4）；
+  输出无法解析 → `error:docker_parse`（退出码 4，附原文摘录），不静默输出 0 体积。
+- **`audit` 全离线可验收**：`--docker-fixture` 直接喂固定文本，不要求本机安装 Docker。
 
 分级是**基于可观察证据的建议**，不是"删除后必然安全"的保证。重建成本需自行确认。
 
 ## 隐私
 
-只读取路径、体积、mtime 与文件名；唯一允许打开正文的文件是白名单里的 `package.json`（且只解析顶层键）。
-不读取源码或文档正文，不上传任何数据，无网络请求。
+只读取路径、体积、mtime 与文件名；唯一允许打开正文的普通文件是白名单里的 `package.json`（且只解析顶层键）。
+`audit` 另会读取 `.git` **文件**（worktree/submodule 形态）的前 4 KiB，只为取 `gitdir:` 一行；
+不读取任何仓库内容或源码正文。不上传任何数据，无网络请求。
 真实审计结果、隔离区、HTML 报告产物一律不入 git（见 `.gitignore`）。
 
 ## 数据与合成树（M1 起）
@@ -129,6 +137,14 @@ py -X utf8 tools/bench_grade.py --tree devdisk-out/synth
 
 # 分级规则的独立参照实现对账（不 import 生产模块）
 py -X utf8 tools/reference_grade.py --tree devdisk-out/synth --scan devdisk-out/scan.json
+
+# M3：只读审计（fixture 主路径 + 合成 .git）
+py -X utf8 -m devdisk audit --root devdisk-out/synth --git \
+  --docker-fixture data/fixtures/docker_system_df/v24_standard.txt \
+  --out devdisk-out/audit.json
+
+# 基准：审计门（Docker fixture 逐字段 + .git 三值 + 前后无变化 + applied:false）
+py -X utf8 tools/bench_audit.py --tree devdisk-out/synth
 ```
 
 类型 / 忽略 / 分级三张规则表都是**单点数据文件**

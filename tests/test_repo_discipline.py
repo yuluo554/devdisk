@@ -5,6 +5,7 @@
 """
 
 import ast
+import json
 import os
 import re
 
@@ -78,6 +79,25 @@ def test_source_does_not_spawn_docker_prune_or_git_gc():
                 if word in call:
                     offenders.append("%s: %s" % (path, word))
     assert offenders == []
+
+
+def test_git_audit_layer_never_spawns_git():
+    """`.git` 审计只做文件系统统计：整个 audit 包不得调用 subprocess 之外的 git 命令。"""
+    audit_root = os.path.join(SRC_ROOT, "audit")
+    git_module = read_text(os.path.join(audit_root, "git.py"))
+    assert "subprocess" not in git_module
+    assert "git gc" in git_module          # 只是建议命令文本
+    assert "applied" in git_module and "False" in git_module
+
+
+def test_docker_audit_only_calls_system_df():
+    """Docker 只调用 `docker system df`；prune 命令只作为数据存在。"""
+    text = read_text(os.path.join(SRC_ROOT, "audit", "docker.py"))
+    calls = re.findall(r"subprocess\.(?:run|call|check_output|Popen)\((.*?)\)", text, re.S)
+    assert calls, "应当有且只有 `docker system df` 这一处调用"
+    for call in calls:
+        assert "DOCKER_COMMAND" in call
+    assert 'DOCKER_COMMAND = ("docker", "system", "df")' in text
 
 
 def test_source_has_no_network_imports():
@@ -267,9 +287,51 @@ def test_truth_files_never_contain_observed_fields():
 
 def test_tools_scripts_are_executable_entrypoints():
     """tools/ 下的脚本必须能被 `py tools/x.py --help` 调用（无 import 期副作用）。"""
-    for name in ("gen_synth_tree.py", "bench_scan.py", "bench_grade.py", "reference_grade.py"):
+    for name in ("gen_synth_tree.py", "bench_scan.py", "bench_grade.py",
+                 "reference_grade.py", "bench_audit.py"):
         path = os.path.join(TOOLS_ROOT, name)
         assert os.path.isfile(path), name
         text = read_text(path)
         assert "def main(" in text
         assert '__name__ == "__main__"' in text
+
+
+# ------------------------------------------------------------------ M3 数据守门
+
+
+def test_docker_fixtures_are_registered():
+    """Docker fixture 是入仓数据：文件齐备，且在 data/README 与 plan/04 登记来源。"""
+    fixture_root = os.path.join(REPO_ROOT, "data", "fixtures", "docker_system_df")
+    for name in ("v24_standard.txt", "v20_standard.txt", "empty.txt",
+                 "malformed.txt", "expect.json"):
+        assert os.path.isfile(os.path.join(fixture_root, name)), name
+
+    data_readme = read_text(os.path.join(REPO_ROOT, "data", "README.md"))
+    plan04 = read_text(os.path.join(REPO_ROOT, "plan", "04-数据计划.md"))
+    for text in (data_readme, plan04):
+        assert "data/fixtures/docker_system_df" in text
+
+    expect = read_text(os.path.join(fixture_root, "expect.json"))
+    assert "source" in expect, "手写真值必须自带来源说明"
+
+
+def test_docker_fixtures_contain_no_real_names_or_absolute_paths():
+    """fixture 手写脱敏：不得出现本机绝对路径、真实镜像名/容器 ID 形态。"""
+    fixture_root = os.path.join(REPO_ROOT, "data", "fixtures", "docker_system_df")
+    path_pattern = re.compile(r"[A-Za-z]:[\\/]|/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/")
+    for name in sorted(os.listdir(fixture_root)):
+        text = read_text(os.path.join(fixture_root, name))
+        assert not path_pattern.search(text), name
+
+
+def test_generated_git_truth_never_contains_observed_fields():
+    """真值只存输入与期望；`.git` 段同样不得出现 `observed_*`。"""
+    truth_path = os.path.join(REPO_ROOT, "devdisk-out", "synth", "truth", "manifest.json")
+    if not os.path.isfile(truth_path):
+        pytest.skip("未生成 devdisk-out/synth（按需生成，不入仓）")
+    payload = json.loads(read_text(truth_path))
+    assert payload["git_repos"], "真值应登记合成仓库"
+    for repo in payload["git_repos"]:
+        for key in repo:
+            assert not key.startswith("observed_"), key
+        assert repo["expected_objects_bytes"] >= 0

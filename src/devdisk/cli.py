@@ -18,7 +18,6 @@ PROG = "devdisk"
 
 # 骨架期未实现的子命令；能力落地那一棒必须同轮从本表移除并补离线冒烟。
 NOT_READY_COMMANDS = {
-    "audit": "M3（Docker 与 .git 只读审计）",
     "clean": "M4（隔离区清理）",
     "undo": "M4（隔离区撤销）",
     "report": "M5（单文件 HTML 报告）",
@@ -50,10 +49,13 @@ def build_parser():
 
     audit = subparsers.add_parser("audit", help="Docker 与 .git 只读审计")
     audit.add_argument("--root", action="append", default=[], metavar="<root>",
-                       help="扫描根，可重复")
+                       help="扫描根，可重复（`--git` 时必填）")
     audit.add_argument("--docker", action="store_true", help="审计 Docker（只调用 docker system df）")
+    audit.add_argument("--docker-fixture", default=None, metavar="<file>",
+                       help="用固定的 docker system df 文本代替真实调用（离线验收主路径）")
     audit.add_argument("--git", action="store_true", help="审计 .git 对象（只读统计）")
     audit.add_argument("--out", default=None, help="审计结果输出路径（默认 devdisk-out/audit.json）")
+    audit.add_argument("--config", default=None, help="配置文件路径（审计阈值）")
 
     clean = subparsers.add_parser("clean", help="把选中项移入隔离区（默认 dry-run）")
     clean.add_argument("--from", dest="from_scan", default=None, metavar="<scan.json>",
@@ -123,6 +125,33 @@ def _run_scan(args):
     return code
 
 
+def _run_audit(args):
+    """audit 子命令：只做参数传递与退出码映射。"""
+    from . import pipeline
+
+    try:
+        code, payload, lines = pipeline.run_audit(
+            roots=args.root,
+            out=args.out,
+            use_docker=args.docker or bool(args.docker_fixture),
+            use_git=args.git,
+            docker_fixture=args.docker_fixture,
+            config_path=args.config,
+        )
+    except pipeline.ScanError as exc:
+        sys.stderr.write("%s：%s\n" % (PROG, exc))
+        return exc.exit_code
+    except OSError as exc:
+        sys.stderr.write(
+            "%s：写盘失败：%s\n下一步：确认输出目录可写，或用 `--out` 指定其他路径。\n"
+            % (PROG, exc)
+        )
+        return exit_codes.USAGE
+
+    _emit(lines)
+    return code
+
+
 def main(argv=None):
     ensure_utf8_stdio()
     parser = build_parser()
@@ -147,6 +176,9 @@ def main(argv=None):
 
     if args.command == "scan":
         return _run_scan(args)
+
+    if args.command == "audit":
+        return _run_audit(args)
 
     if args.command in NOT_READY_COMMANDS:
         return _not_ready(args.command)

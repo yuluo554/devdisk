@@ -57,6 +57,23 @@ def iso_from_epoch_seconds(seconds):
     return utc_iso_from_ns(int(seconds) * 1000000000)
 
 
+def format_bytes(value):
+    """展示层：1024 进制、两位小数（`data/README.md` §四 第 1 条）。
+
+    单点定义在 `model`，CLI 摘要、审计建议与（M5）报告共用，避免第二套口径。
+    """
+    value = int(value)
+    units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+    amount = float(value)
+    index = 0
+    while amount >= 1024.0 and index < len(units) - 1:
+        amount /= 1024.0
+        index += 1
+    if index == 0:
+        return "%d B" % value
+    return "%.2f %s" % (amount, units[index])
+
+
 def normalize_path(path):
     """统一为绝对、normpath、normcase 的路径。
 

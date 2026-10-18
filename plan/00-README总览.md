@@ -3,7 +3,7 @@
 - 性质：不参赛项目题 · 发布 GitHub **公开仓库** · 署名 yuluo554
 - 定位宣言："开发者磁盘被 node_modules/.venv/构建产物/Docker 镜像缓存/大 .git 对象吃掉，但没人敢删——本工具按'可重建性 + 最后修改时间 + 依赖关系'给出**分级可删清单**，默认只出报告、清理必须显式确认、删除走隔离区可回滚。**安全分级与中文界面是差异化**：已有工具覆盖了多数目录类型，但没人把 Docker 与 .git 纳入统一的安全分级，也没人把'误删的代价'做成可回滚。"
 - 交付形态：**纯本地 Python CLI + 本地单文件 HTML 报告**（唯一形态）；无服务器、无 GPU、无网络。
-- 下一棒：ai-tool-project-sprint（说"继续"默认从 M1 数据先行开工）。
+- 下一棒：M4 隔离与回滚（入口 `plan/HANDOFF-M4.md`；说"继续"默认从该文件开工）。
 
 ## 文档索引表
 
@@ -19,6 +19,7 @@
 | plan/HANDOFF-M1.md | 下一棒（M1 数据先行 + 扫描）的交接快照 | ✅ M0 |
 | plan/HANDOFF-M2.md | 下一棒（M2 安全分级）的交接快照 | ✅ M1 |
 | plan/HANDOFF-M3.md | 下一棒（M3 Docker 与 .git 只读审计）的交接快照 | ✅ M2 |
+| plan/HANDOFF-M4.md | 下一棒（M4 隔离与回滚）的交接快照 | ✅ M3 |
 | data/README.md | 依据查证记录 + 数据源可获取性 + 合成与口径纪律 | ✅ v1 |
 | .gitignore / .gitattributes | 运行时产物不入仓；源码 LF、二进制不归一 | ✅ v1 |
 | pyproject.toml / src/ / tests/ / tools/ | 可安装骨架、CLI 契约、纪律守门 | ✅ M0 |
@@ -27,6 +28,8 @@
 | src/devdisk/evidence.py + grader.py | 证据提取与分级引擎（引擎零硬编码规则，M2） | ✅ M2 |
 | tools/gen_synth_tree.py + tools/bench_scan.py | 合成树生成器与扫描真值基准（M1） | ✅ M1 |
 | tools/bench_grade.py + tools/reference_grade.py | 分级基准与分级规则的独立参照实现（M2） | ✅ M2 |
+| src/devdisk/audit/ + tools/bench_audit.py | Docker 与 `.git` 只读审计 + fixture/合成仓库双边基准（M3） | ✅ M3 |
+| data/fixtures/docker_system_df/ | Docker `system df` 固定文本 fixture + 手写真值 `expect.json`（M3） | ✅ M3 |
 | .github/workflows/ci.yml | CI 矩阵（windows/ubuntu × 3.8/3.12） | ✅ M0（待首推验证） |
 | plan/RELEASE-M6.md | 发布留档三件套落点 | ⬜ 待 M6 |
 
@@ -57,6 +60,10 @@
 | 2026-10-18 | M2：安全结论必须过**证据门槛**（无证据或子树读不全 → 谨慎） | 与"读不到不给结论"同源：证明不了"纯缓存/纯依赖"就不能宣称可安全删除。变异验证：摘掉该分支 → 常驻门变红。 |
 | 2026-10-18 | M2：`totals.by_grade` 三级键恒在，`forbidden` 不计入可回收体积 | 报告层要直接相加三级体积；`.git` 这类禁止项只做只读审计对象，永不进入"可删合计"。 |
 | 2026-10-18 | M2：分级另做一份**独立参照实现**（`tools/reference_grade.py`） | 引擎与自己的测试同源会掩盖错误；参照实现候选清单取自植入真值、规则逻辑另行抄写、禁止 import 生产模块，逐样本对账。 |
+| 2026-10-18 | **M3 落地形态**：`audit/` 子包 + fixture 为验收主路径 + `.git` 只做文件系统统计 | Docker 真实环境不保证存在，固定文本 fixture 才是可复现的验收主路径（`--docker-fixture` 直接喂文本，真实调用只作可选增强）；`.git` 统计不调用 git，避免版本差异与任何写操作风险。 |
+| 2026-10-18 | M3：`.git` 审计前后做 `(相对路径, size, mtime_ns)` 快照并断言不变 | 只比字节数会漏掉"被改写但大小不变"的破坏；相对路径保证日志可复现且不含本机绝对路径。不一致 → `error:git_mutated` + 退出码 5。 |
+| 2026-10-18 | M3：`.git` 是文件（worktree/submodule）时记 `skipped:gitdir_file` 且不跟随 | 跟随 gitdir 会把审计范围伸出扫描根，也容易把共享仓库统计两遍；记目标路径即可让用户自行判断。 |
+| 2026-10-18 | M3：Docker 只有表头视为合法空场景，有数据行却缺整类视为解析失败 | "没有资源"与"格式变了"必须区分：前者四类为 0，后者 `error:docker_parse`，不能静默填空。 |
 
 ## 承诺-证据台账
 
@@ -68,9 +75,9 @@
 | 符号链接不跟随、不越界、不重复计数 | `entry.is_symlink()` + reparse 判定 + `(st_dev, st_ino)` 去重 | 运行时逻辑 | 符号链接与环形链接负样本；扫描根外目标断言被跳过 | ✅ M1（越界记 `outside_root`、环记 `symlink_cycle`、硬链接去重有专门用例） |
 | 三级安全分级（安全可删/谨慎/禁止） | 本题设计；判定规则在 `data/rules/grades.json`；证据来自目录结构、mtime、白名单文件名 | 运行时逻辑 | 分级基准：与植入真值逐样本一致（18/18）；证据不足落"谨慎"；独立参照实现对账一致 | ✅ M2（`bench_grade.py` 18/18、逐项差异 0；`reference_grade.py` PASS） |
 | 分级理由与证据可解释（非裸标签） | 本题设计 | CLI 摘要、JSON 输出的 `reason`/`evidence` 字段（M5 报告沿用） | 每条候选断言 `reason` 非空且 `evidence` ≥ 1 条；证据 `path` 为相对路径，不泄漏绝对路径 | ✅ M2（常驻不变量门 + `bench_grade.py` 证据门） |
-| Docker 只读审计（`docker system df` 解析四类体积） | Docker CLI 可选增强 | 缺失时 `skipped:docker_unavailable` 降级 | fixture 基准：解析正确；无 prune 调用；`applied: false` | ⬜ 待 M3 |
-| `.git` 只读审计（objects 体积、pack 数、loose 数） | 文件系统统计；不调用 git 写操作 | 纯本地 | 合成仓库基准：数值正确；审计前后 `.git` 元数据不变 | ⬜ 待 M3 |
-| `.git` 永不自动处理、只建议 `git gc` | 产品纪律 | 代码层无删除/gc 调用；输出标注 `applied: false` | 静态扫描：无 `git gc`/`git prune` 执行；动态：仓库无变化 | ⬜ 待 M3 |
+| Docker 只读审计（`docker system df` 解析四类体积） | Docker CLI 可选增强 | 缺失时 `skipped:docker_unavailable` 降级 | fixture 基准：解析正确；无 prune 调用；`applied: false` | ✅ M3（`bench_audit.py` 4 个 fixture 用例差异 0；缺失/超时/畸形三条降级路径有专门用例；`applied:false` 断言常驻） |
+| `.git` 只读审计（objects 体积、pack 数、loose 数） | 文件系统统计；不调用 git 写操作 | 纯本地 | 合成仓库基准：数值正确；审计前后 `.git` 元数据不变 | ✅ M3（objects 4198912 / pack 2 / loose 2 精确；`objects/info` 与 `.idx` 排除；worktree `.git` 文件记 `skipped:gitdir_file`；前后快照断言） |
+| `.git` 永不自动处理、只建议 `git gc` | 产品纪律 | 代码层无删除/gc 调用；输出标注 `applied: false` | 静态扫描：无 `git gc`/`git prune` 执行；动态：仓库无变化 | ✅ M3（`audit/git.py` 无 `subprocess`；`applied:false` 断言；审计前后元数据清单不变） |
 | 隔离区 `.trash/<batch-id>/` + manifest + 一键撤销 | 本题设计；`shutil.move` | CLI 子命令 | 撤销后 tree digest 一致；中断恢复用例 | ⬜ 待 M4 |
 | 永不 `rm -rf`、无"一键清理全部" | 产品纪律 | 代码与 CLI 均无此路径 | 静态扫描：无 `rm -rf`/`shutil.rmtree`；CLI 无全选参数 | ⬜ 待 M4（M1 已加：扫描层不产生删除调用） |
 | 单文件中文 HTML 报告（体积排行/项目与类型聚合/可删合计） | 标准库模板 | 报告文件随仓生成 | 报告无外部 URL；合计与排行对真值；断网可读 | ⬜ 待 M5 |

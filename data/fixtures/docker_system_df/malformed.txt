@@ -1,0 +1,4 @@
+TYPE   TOTAL  ACTIVE  SIZE
+Images  2      1       1.5GB
+Containers  3  1
+��� 乱码行：缺列且不可解析
