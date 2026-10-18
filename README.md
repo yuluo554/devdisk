@@ -12,8 +12,8 @@
 - 永不 `rm -rf`：清理 = 移动到 `.trash/<batch-id>/`，`undo` 逐字节恢复
 - `.git` 只读：只统计体积与对象数，最多建议 `git gc`，从不执行
 
-**状态**：v0.1.0 · M0–M5 已完成（扫描 + 分级 + Docker/`.git` 审计 + 清理与撤销 + 单文件报告）；
-M6 发布进行中（本仓库即将公开，发布留档 `plan/RELEASE-M6.md`）。
+**状态**：v0.1.0 已发布（M0–M6 全部完成）。发布留档见 `plan/RELEASE-M6.md`；
+CI 在 windows/ubuntu × Python 3.8/3.12 四矩阵上全绿。
 `scan` 输出**扫描事实**（类型 / 体积 / mtime / 项目根 / 跳过原因）与**分级结论**
 （`grade` / `reason` / `evidence`，`totals.by_grade` 三级体积合计）；
 分级判定来自数据文件 `data/rules/grades.json`，引擎零硬编码规则。
