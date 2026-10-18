@@ -67,7 +67,10 @@
 |---|---|---|---|
 | `push` → main（`34e278e`，M6 文档提交） | `39098631262` | **failure** | 首跑诊断轮：ubuntu 3.8/3.12 全绿；windows 3.8/3.12 同挂一步 |
 | `push` → main（`035152e`，CI 修复提交） | `39099349952` | **success** | 四矩阵全绿（windows/ubuntu × 3.8/3.12） |
-| `push` tag `v0.1.0` | 见下（本文件在 tag 树内，run id 于 tag 后追加记录） | — | `on: push` 无 filters，tag push 同样触发一轮 |
+| `push` → main（`7c6cafa`，发布留档提交） | `39100048326` | **success** | 四矩阵全绿 |
+| `push` tag `v0.1.0`（`7c6cafa`） | `39100349492` | **success** | 四矩阵全绿；`on: push` 无 filters，tag push 确实触发独立一轮 |
+
+**push 数 = run 数对账**：3 次 push（main × 3）+ 1 次 tag push = 4 轮 run，与 `gh run list` 一致。
 
 **首跑失败根因（如实留档）**：失败面签名是"windows 两个矩阵一起挂、ubuntu 两个过"，
 不是"各平台各挂各的"。定位到唯一失败步骤 `Smoke (audit docker missing degrades)`：
@@ -96,38 +99,53 @@ sha256sum devdisk-0.1.0-src.tar.gz
 - 发布包 sha256 与字节数记录在 `plan/RELEASE-M6.md` 本节的 Facts 块与 GitHub Release 正文；
   下载后 `sha256sum -c` 可直接复验。
 
-**Facts（发布时回填实际值）**
+**Facts（发布后回填，实测值）**
 
 ```text
 artifact : devdisk-0.1.0-src.tar.gz
-sha256   : <tag 后回填>
-bytes    : <tag 后回填>
+sha256   : ded50603172a094e4344a9886bbfb3bf28dad668cc54fc28b8444cde7ebbaf62
+bytes    : 219245
 tag      : v0.1.0
+tag tree : 67 个跟踪文件（archive 内 67 个文件条目 + 13 个目录条目）
+```
+
+读者可一条命令复验（在下载目录里）：
+
+```bash
+sha256sum -c <<'EOF'
+ded50603172a094e4344a9886bbfb3bf28dad668cc54fc28b8444cde7ebbaf62  devdisk-0.1.0-src.tar.gz
+EOF
 ```
 
 > 为什么 sha256 在 tag 之后才回填：源码包里包含本文件的"已发布"版本，
-> 任何在 tag 之前写死的哈希都会因内容变化而失效。回填提交属追加类（`POST_TAG` 允许）。
+> 任何在 tag 之前写死的哈希都会因内容变化而失效。回填提交属追加类（`POST_TAG` 允许），
+> **tag 不移动**，所以发布包字节与该 tag 始终同源。
 
 ## 五、tag / Release / 发布物本体复核
 
 | 项目 | 判据 | 结果 |
 |---|---|---|
 | tag 类型 | `git cat-file -t v0.1.0` | annotated tag（`tag`） |
-| tag 指向 | `git rev-list -n1 v0.1.0` == 本地 HEAD（tag 时） | 一致 |
-| tag 树含发布留档 | `git ls-tree -r --name-only v0.1.0` 含 `plan/RELEASE-M6.md` | 是（本文件） |
+| tag 指向 | `git rev-list -n1 v0.1.0` == tag 时的 HEAD `7c6cafa` | 一致（此后只有追加类提交，tag 未移动） |
+| tag 树含发布留档 | `git ls-tree -r --name-only v0.1.0` 含 `plan/RELEASE-M6.md` | 是 |
 | tag 树 README 状态 | 不应命中"待发布/待首推/收尾中" | 已改为"已发布" |
-| Release 附件 | `gh release view v0.1.0 --json isDraft,assets` | 1 个附件 `devdisk-0.1.0-src.tar.gz` |
-| 本体重复核 | 真下载 → `sha256sum` 与 Facts 块一致 → 中立目录解包 → `devdisk selftest` | 见下方回填 |
-| 二次构建一致性 | 解包树重新 `git archive` 等价物比对 | 见下方回填 |
+| Release 附件 | `gh release view v0.1.0 --json isDraft,assets` | `isDraft=false`；1 个附件 `devdisk-0.1.0-src.tar.gz`（219245 字节） |
+| 真下载 sha256 | `gh release download` → `sha256sum` | `ded50603…bbaf62`，与 §四 Facts 一致 |
+| 与 tag 树同源 | 从 tag 重新 `git archive \| gzip -9n` → 与下载件 `cmp` | **逐字节一致** |
+| 中立目录解包冒烟 | 解包 → 全新 venv → `pip install -e ".[dev]"` → `devdisk selftest` | exit 0（`OK 骨架不变量全部通过`） |
+| 解包树全量测试 | 同一 venv 跑 `pytest -q` | 全绿；2 项跳过且可指认（`devdisk-out/synth` 按需生成、不入仓） |
 
 ## 六、门禁结果
 
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 出题定稿门 | `check_topic.py .` | 22 PASS / 0 WARN / 0 FAIL |
-| 发布终态门 | `check_release.py . --tag v0.1.0` | 见下方回填（0 FAIL） |
+| 发布终态门 | `check_release.py . --tag v0.1.0` | 0 FAIL（本轮回填后复跑，见下） |
 | 全量回归 | `py -3.12 -m pytest` / `py -3.8 -m pytest` | 各 312 passed |
 | 自检 | `devdisk selftest` | exit 0 |
+
+> 发布终态门的 `POST_TAG` 会把"tag 之后有追加类提交（回写/对账/留档）"记为 WARN 而非 FAIL：
+> 本轮 §三/§四/§五 的事实回填只能发生在 tag 之后（哈希自指问题），这是设计允许的形态。
 
 ## 七、本轮已知缺口（如实）
 
@@ -139,4 +157,6 @@ tag      : v0.1.0
 - 报告"断网双击打开"只在本机 Windows 默认浏览器验证过一次，未在 Linux/macOS 复核；
   零外链靠渲染出口常驻断言，而不是浏览器网络面板。
 - tag 之后的对账事实（run id、sha256、复核结论）以追加提交形式补记在
-  §三 / §四 / §五，tag 树内保留占位标记。
+  §三 / §四 / §五；tag 树内保留"待回填"标记，这是自指哈希问题的必然形态。
+- 解包树全量测试有 2 项跳过，均因 `devdisk-out/synth` 是按需生成、不入仓；
+  生成后这两项在本地开发树与干净 clone 中均实际跑过（见 §一 第 7/17/18 条）。
