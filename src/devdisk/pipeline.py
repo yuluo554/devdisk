@@ -21,9 +21,6 @@ from .audit import DEGRADED_STATUSES
 from .audit import STATUS_GIT_MUTATED
 from .audit import STATUS_NOT_REQUESTED
 from .audit import STATUS_OK
-from .audit import STATUS_DOCKER_PARSE
-from .audit import STATUS_DOCKER_TIMEOUT
-from .audit import STATUS_DOCKER_UNAVAILABLE
 from .audit import docker as docker_audit
 from .audit import git as git_audit
 from .grader import grade_result, make_context
