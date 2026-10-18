@@ -87,3 +87,65 @@ jobs:
 
       - name: "Bench (audit: docker fixtures + synth .git)"
         run: python tools/bench_audit.py --tree devdisk-out/synth
+
+      # M4：隔离区清理与撤销（dry-run 默认不写盘；apply+undo 往返；中断恢复）
+      - name: Smoke (clean dry-run / apply / undo, offline)
+        shell: bash
+        run: |
+          set -e
+          python - <<'PY'
+          import json, os, shutil
+          from devdisk import exit_codes
+          from devdisk import pipeline
+
+          work = os.path.abspath(os.path.join("devdisk-out", "clean-smoke"))
+          if os.path.isdir(work):
+              shutil.rmtree(work)
+          root = os.path.join(work, "root")
+          target = os.path.join(root, "demo-web", "node_modules")
+          os.makedirs(os.path.join(target, "pkg"))
+          with open(os.path.join(root, "demo-web", "package.json"), "w", encoding="utf-8") as handle:
+              handle.write('{"name": "demo-web"}')
+          with open(os.path.join(root, "demo-web", "package-lock.json"), "w", encoding="utf-8") as handle:
+              handle.write("{}")
+          with open(os.path.join(target, "pkg", "index.js"), "wb") as handle:
+              handle.write(b"x" * 256)
+
+          scan_path = os.path.join(work, "scan.json")
+          code, payload, _ = pipeline.run_scan([root], out=scan_path, min_bytes=0)
+          assert code == exit_codes.OK, code
+
+          # 1) dry-run：不写隔离区、不移动。
+          code, dry, _ = pipeline.run_clean(from_scan=scan_path, select=[target],
+                                            out=os.path.join(work, "dry.json"))
+          assert code == exit_codes.OK, code
+          assert dry["mode"] == "dry_run"
+          assert dry["entries"]
+          assert not os.path.lexists(os.path.join(root, ".trash")), "dry-run 创建了隔离区"
+          assert os.path.isdir(target), "dry-run 移动了源目录"
+
+          # 2) 未给选择 → 退出码 1（无全选）。
+          try:
+              pipeline.run_clean(from_scan=scan_path)
+          except pipeline.ScanError as exc:
+              assert exc.exit_code == exit_codes.REFUSED, exc.exit_code
+          else:
+              raise AssertionError("未给选择却执行了 clean")
+
+          # 3) apply + undo：撤销后原路径与内容回来。
+          code, applied, _ = pipeline.run_clean(
+              from_scan=scan_path, select=[target], apply=True, yes=True,
+              out=os.path.join(work, "apply.json"))
+          assert code == exit_codes.OK, code
+          assert not os.path.lexists(target), "apply 后源目录仍在"
+
+          code, undone, _ = pipeline.run_undo(
+              applied["batch_id"], trash=applied["trash_root"], yes=True,
+              out=os.path.join(work, "undo.json"))
+          assert code == exit_codes.OK, code
+          assert os.path.isfile(os.path.join(target, "pkg", "index.js")), "undo 未恢复内容"
+          print("clean/undo smoke: OK")
+          PY
+
+      - name: "Bench (clean/undo roundtrip + interrupt resume)"
+        run: python tools/bench_clean.py --tree devdisk-out/synth

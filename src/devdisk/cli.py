@@ -18,8 +18,6 @@ PROG = "devdisk"
 
 # 骨架期未实现的子命令；能力落地那一棒必须同轮从本表移除并补离线冒烟。
 NOT_READY_COMMANDS = {
-    "clean": "M4（隔离区清理）",
-    "undo": "M4（隔离区撤销）",
     "report": "M5（单文件 HTML 报告）",
 }
 
@@ -61,15 +59,27 @@ def build_parser():
     clean.add_argument("--from", dest="from_scan", default=None, metavar="<scan.json>",
                        help="候选清单路径")
     clean.add_argument("--select", action="append", default=[], metavar="<path>",
-                       help="显式选中的路径，可重复")
+                       help="显式选中的路径，可重复；不提供全选")
     clean.add_argument("--apply", action="store_true", help="真正执行移动（缺省为 dry-run）")
     clean.add_argument("--yes", action="store_true", help="跳过交互确认")
     clean.add_argument("--trash", default=None, help="隔离区根目录（默认 <root>/.trash）")
+    clean.add_argument("--resume", default=None, metavar="<batch-id>",
+                       help="按 manifest 续做中断的批次（与 --select 互斥）")
+    clean.add_argument("--out", default=None, help="批次摘要输出路径（默认 devdisk-out/clean.json）")
+    clean.add_argument("--config", default=None, help="配置文件路径")
 
     undo = subparsers.add_parser("undo", help="按 manifest 逆序撤销一个批次")
     undo.add_argument("batch_id", metavar="<batch-id>", help="批次 ID")
-    undo.add_argument("--trash", default=None, help="隔离区根目录")
-    undo.add_argument("--yes", action="store_true", help="跳过交互确认")
+    undo.add_argument("--trash", default=None,
+                      help="隔离区根目录（默认当前目录下的 .trash）")
+    undo.add_argument("--yes", action="store_true", help="确认执行撤销")
+    undo.add_argument("--stop-on-conflict", dest="stop_on_conflict",
+                      action="store_true", default=True,
+                      help="遇到冲突立即停止（默认）")
+    undo.add_argument("--continue-on-conflict", dest="stop_on_conflict",
+                      action="store_false",
+                      help="遇到冲突继续处理其余条目")
+    undo.add_argument("--out", default=None, help="撤销结果输出路径（默认 devdisk-out/undo.json）")
 
     report = subparsers.add_parser("report", help="生成单文件中文 HTML 报告")
     report.add_argument("--input", required=True, metavar="<scan.json>", help="候选清单路径")
@@ -152,6 +162,61 @@ def _run_audit(args):
     return code
 
 
+def _run_clean(args):
+    """clean 子命令：只做参数传递与退出码映射。"""
+    from . import pipeline
+
+    try:
+        code, payload, lines = pipeline.run_clean(
+            from_scan=args.from_scan,
+            select=args.select,
+            apply=args.apply,
+            yes=args.yes,
+            trash=args.trash,
+            resume_batch=args.resume,
+            out=args.out,
+            config_path=args.config,
+        )
+    except pipeline.ScanError as exc:
+        sys.stderr.write("%s：%s\n" % (PROG, exc))
+        return exc.exit_code
+    except OSError as exc:
+        sys.stderr.write(
+            "%s：写盘失败：%s\n下一步：确认输出目录可写，或用 `--out` 指定其他路径。\n"
+            % (PROG, exc)
+        )
+        return exit_codes.USAGE
+
+    _emit(lines)
+    return code
+
+
+def _run_undo(args):
+    """undo 子命令：只做参数传递与退出码映射。"""
+    from . import pipeline
+
+    try:
+        code, payload, lines = pipeline.run_undo(
+            batch_id=args.batch_id,
+            trash=args.trash,
+            yes=args.yes,
+            out=args.out,
+            stop_on_conflict=args.stop_on_conflict,
+        )
+    except pipeline.ScanError as exc:
+        sys.stderr.write("%s：%s\n" % (PROG, exc))
+        return exc.exit_code
+    except OSError as exc:
+        sys.stderr.write(
+            "%s：写盘失败：%s\n下一步：确认输出目录可写，或用 `--out` 指定其他路径。\n"
+            % (PROG, exc)
+        )
+        return exit_codes.USAGE
+
+    _emit(lines)
+    return code
+
+
 def main(argv=None):
     ensure_utf8_stdio()
     parser = build_parser()
@@ -179,6 +244,12 @@ def main(argv=None):
 
     if args.command == "audit":
         return _run_audit(args)
+
+    if args.command == "clean":
+        return _run_clean(args)
+
+    if args.command == "undo":
+        return _run_undo(args)
 
     if args.command in NOT_READY_COMMANDS:
         return _not_ready(args.command)

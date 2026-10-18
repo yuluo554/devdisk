@@ -18,7 +18,7 @@ REQUIRED_COMMANDS = ("scan", "audit", "clean", "undo", "report")
 REQUIRED_EXIT_CODES = ("OK", "REFUSED", "USAGE", "NOT_READY", "DEGRADED", "UNSAFE")
 
 # 已退役 NOT_READY、必须真正可用的子命令（每棒追加）。
-RETIRED_COMMANDS = ("scan", "audit")
+RETIRED_COMMANDS = ("scan", "audit", "clean", "undo")
 
 
 def run_selftest(parser):
@@ -53,6 +53,7 @@ def run_selftest(parser):
     problems.extend(_check_rules())
     problems.extend(_check_grade_rules())
     problems.extend(_check_audit_invariants())
+    problems.extend(_check_quarantine_invariants())
 
     if problems:
         for problem in problems:
@@ -225,3 +226,98 @@ def _check_audit_invariants():
 def _write_bytes(path, size):
     with open(path, "wb") as handle:
         handle.write(b"\0" * size)
+
+
+def _check_quarantine_invariants():
+    """M4 不变量：批次 ID 形态、digest 稳定、往返移动一致、选择必填。
+
+    全部在临时目录内完成，不触碰真实用户目录；离线可跑。
+    """
+    import datetime
+    import tempfile
+
+    from . import digest as digest_mod
+    from . import exit_codes as codes
+    from . import manifest as manifest_mod
+    from . import model as model_mod
+    from . import pipeline as pipeline_mod
+    from . import quarantine as quarantine_mod
+
+    problems = []
+
+    batch_id = quarantine_mod.make_batch_id(
+        now=datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        suffix="a1b2c3")
+    if batch_id != "20260101-120000-a1b2c3":
+        problems.append("批次 ID 形态不符：%r" % (batch_id,))
+
+    with tempfile.TemporaryDirectory(prefix="devdisk-selftest-clean-") as temp_dir:
+        source_root = os.path.join(temp_dir, "root")
+        target = os.path.join(source_root, "demo-web", "node_modules")
+        os.makedirs(os.path.join(target, "pkg"))
+        _write_bytes(os.path.join(target, "pkg", "index.js"), 128)
+        _write_bytes(os.path.join(target, "package.json"), 32)
+
+        before = digest_mod.tree_digest(target)
+        trash_root = os.path.join(source_root, ".trash")
+        os.makedirs(trash_root)
+        batch_dir = os.path.join(trash_root, batch_id)
+        os.makedirs(batch_dir)
+        trash_path = os.path.join(batch_dir, "demo-web", "node_modules")
+
+        entry = manifest_mod.new_entry(
+            original_path=model_mod.display_path(target),
+            trash_path=model_mod.display_path(trash_path),
+            relative_path="demo-web/node_modules",
+            bytes=160, grade=model_mod.GRADE_SAFE, reason="selftest",
+            mtime_utc=None, tree_digest=before)
+        payload = manifest_mod.new_manifest(
+            batch_id, model_mod.display_path(trash_root),
+            model_mod.display_path(source_root), "select", [entry])
+        manifest_mod.save(batch_dir, payload)
+
+        quarantine_mod.move(target, trash_path)
+        after_move = digest_mod.tree_digest(trash_path)
+        if not digest_mod.digests_match(before, after_move):
+            problems.append("隔离区移动后 tree digest 变化")
+        if os.path.lexists(target):
+            problems.append("隔离区移动后原路径仍存在")
+
+        quarantined = manifest_mod.load(batch_dir)
+        manifest_mod.mark_entry(quarantined, quarantined["entries"][0],
+                                manifest_mod.STATUS_MOVED, tree_digest=after_move)
+        manifest_mod.save(batch_dir, quarantined)
+
+        restored = pipeline_mod._restore_entries(batch_dir, quarantined)
+        if restored["entries"][0]["status"] != manifest_mod.STATUS_RESTORED:
+            problems.append("撤销未把条目恢复为 restored（实际 %s）"
+                            % restored["entries"][0]["status"])
+        if not os.path.isdir(target):
+            problems.append("撤销后原路径不存在")
+        elif not digest_mod.digests_match(digest_mod.tree_digest(target), before):
+            problems.append("撤销后 tree digest 与移动前不一致")
+
+        # 选择必填：未给 `--select` 必须拒绝（退出码 1，不得默认全选）。
+        try:
+            pipeline_mod.run_clean(out=os.path.join(temp_dir, "clean.json"))
+        except pipeline_mod.ScanError as exc:
+            if exc.exit_code != codes.REFUSED:
+                problems.append("未选择时退出码不是 REFUSED（实际 %s）" % exc.exit_code)
+        else:
+            problems.append("未给选择却执行了 clean（禁止默认全选）")
+
+        # dry-run 不得创建隔离区目录。
+        dry_root = os.path.join(temp_dir, "dry")
+        os.makedirs(os.path.join(dry_root, "demo-web", "node_modules"))
+        _write_bytes(os.path.join(dry_root, "demo-web", "node_modules", "a.js"), 8)
+        dry_trash = os.path.join(dry_root, ".trash")
+        try:
+            pipeline_mod.run_clean(
+                select=[os.path.join(dry_root, "demo-web", "node_modules")],
+                out=os.path.join(temp_dir, "dry.json"))
+        except pipeline_mod.ScanError as exc:
+            problems.append("dry-run 意外失败：%s" % exc)
+        if os.path.lexists(dry_trash):
+            problems.append("dry-run 创建了隔离区目录（应只读）")
+
+    return problems

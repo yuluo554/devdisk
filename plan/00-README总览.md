@@ -3,7 +3,7 @@
 - 性质：不参赛项目题 · 发布 GitHub **公开仓库** · 署名 yuluo554
 - 定位宣言："开发者磁盘被 node_modules/.venv/构建产物/Docker 镜像缓存/大 .git 对象吃掉，但没人敢删——本工具按'可重建性 + 最后修改时间 + 依赖关系'给出**分级可删清单**，默认只出报告、清理必须显式确认、删除走隔离区可回滚。**安全分级与中文界面是差异化**：已有工具覆盖了多数目录类型，但没人把 Docker 与 .git 纳入统一的安全分级，也没人把'误删的代价'做成可回滚。"
 - 交付形态：**纯本地 Python CLI + 本地单文件 HTML 报告**（唯一形态）；无服务器、无 GPU、无网络。
-- 下一棒：M4 隔离与回滚（入口 `plan/HANDOFF-M4.md`；说"继续"默认从该文件开工）。
+- 下一棒：M5 报告与收口（入口 `plan/HANDOFF-M5.md`；说"继续"默认从该文件开工）。
 
 ## 文档索引表
 
@@ -20,6 +20,7 @@
 | plan/HANDOFF-M2.md | 下一棒（M2 安全分级）的交接快照 | ✅ M1 |
 | plan/HANDOFF-M3.md | 下一棒（M3 Docker 与 .git 只读审计）的交接快照 | ✅ M2 |
 | plan/HANDOFF-M4.md | 下一棒（M4 隔离与回滚）的交接快照 | ✅ M3 |
+| plan/HANDOFF-M5.md | 下一棒（M5 报告与收口）的交接快照 | ✅ M4 |
 | data/README.md | 依据查证记录 + 数据源可获取性 + 合成与口径纪律 | ✅ v1 |
 | .gitignore / .gitattributes | 运行时产物不入仓；源码 LF、二进制不归一 | ✅ v1 |
 | pyproject.toml / src/ / tests/ / tools/ | 可安装骨架、CLI 契约、纪律守门 | ✅ M0 |
@@ -29,6 +30,8 @@
 | tools/gen_synth_tree.py + tools/bench_scan.py | 合成树生成器与扫描真值基准（M1） | ✅ M1 |
 | tools/bench_grade.py + tools/reference_grade.py | 分级基准与分级规则的独立参照实现（M2） | ✅ M2 |
 | src/devdisk/audit/ + tools/bench_audit.py | Docker 与 `.git` 只读审计 + fixture/合成仓库双边基准（M3） | ✅ M3 |
+| src/devdisk/quarantine.py + manifest.py + digest.py | 批次 ID、同文件系统校验、manifest 状态机、tree digest 完整性校验（M4） | ✅ M4 |
+| tools/bench_clean.py | 隔离区往返基准（清理→撤销 digest 一致）+ 中断恢复 + dry-run 只读（M4） | ✅ M4 |
 | data/fixtures/docker_system_df/ | Docker `system df` 固定文本 fixture + 手写真值 `expect.json`（M3） | ✅ M3 |
 | .github/workflows/ci.yml | CI 矩阵（windows/ubuntu × 3.8/3.12） | ✅ M0（待首推验证） |
 | plan/RELEASE-M6.md | 发布留档三件套落点 | ⬜ 待 M6 |
@@ -64,6 +67,12 @@
 | 2026-10-18 | M3：`.git` 审计前后做 `(相对路径, size, mtime_ns)` 快照并断言不变 | 只比字节数会漏掉"被改写但大小不变"的破坏；相对路径保证日志可复现且不含本机绝对路径。不一致 → `error:git_mutated` + 退出码 5。 |
 | 2026-10-18 | M3：`.git` 是文件（worktree/submodule）时记 `skipped:gitdir_file` 且不跟随 | 跟随 gitdir 会把审计范围伸出扫描根，也容易把共享仓库统计两遍；记目标路径即可让用户自行判断。 |
 | 2026-10-18 | M3：Docker 只有表头视为合法空场景，有数据行却缺整类视为解析失败 | "没有资源"与"格式变了"必须区分：前者四类为 0，后者 `error:docker_parse`，不能静默填空。 |
+| 2026-10-18 | **M4 落地形态**：`quarantine.py`（移动）+ `manifest.py`（状态机）+ `digest.py`（完整性）三层分离 | 编排层只做"校验 → 调用 → 组装 → 写盘"。移动前后各算一次 digest，由编排层比对；隔离层不含任何退出码判定（`QuarantineError` 由编排层映射），CLI 仍然零判定。 |
+| 2026-10-18 | M4：`--apply` 必须有 `--yes`（非 TTY 不读终端） | 非交互环境里 `input()` 可能抛 `OSError` 或读到 EOF；显式拒绝（退出码 1）比"猜用户想要"安全。TTY 下的二次确认要求输入完整 `MOVE <batch-id>`，避免回车误触。 |
+| 2026-10-18 | M4：**未给 `--select` 一律退出码 1**，`--from` 只提供候选上下文，绝不充当"全选" | 这是产品纪律里"无一键清理全部"的实现单点：`--from` 单独出现时没有任何条目可移动，必须显式列出路径。守门测试同时反射 CLI 参数面与源码语义。 |
+| 2026-10-18 | M4：隔离区在扫描根内时必须被忽略规则命中（默认 `.trash`） | 否则"清理 → 重扫又发现 → 再清理"形成假循环。自定义 `--trash` 若落在根内且未被忽略，直接退出码 5，而不是静默允许。 |
+| 2026-10-18 | M4：撤销默认 `--stop-on-conflict`（整体停止），可显式改 `--continue-on-conflict` | 默认停止保护"用户没看到的后续条目"；继续模式留给"已知冲突、只想救回其余"的场景。两种模式都必须保持"不覆盖"与"已完成条目保留"。 |
+| 2026-10-18 | M4：`tree_digest` 不含 mtime，含空目录与链接目标 | 移动会改时间戳，但内容与结构不变；空目录是结构事实（撤销后必须还原）；链接目标字符串不跟随，避免把隔离区外的内容卷入校验。 |
 
 ## 承诺-证据台账
 
@@ -78,8 +87,8 @@
 | Docker 只读审计（`docker system df` 解析四类体积） | Docker CLI 可选增强 | 缺失时 `skipped:docker_unavailable` 降级 | fixture 基准：解析正确；无 prune 调用；`applied: false` | ✅ M3（`bench_audit.py` 4 个 fixture 用例差异 0；缺失/超时/畸形三条降级路径有专门用例；`applied:false` 断言常驻） |
 | `.git` 只读审计（objects 体积、pack 数、loose 数） | 文件系统统计；不调用 git 写操作 | 纯本地 | 合成仓库基准：数值正确；审计前后 `.git` 元数据不变 | ✅ M3（objects 4198912 / pack 2 / loose 2 精确；`objects/info` 与 `.idx` 排除；worktree `.git` 文件记 `skipped:gitdir_file`；前后快照断言） |
 | `.git` 永不自动处理、只建议 `git gc` | 产品纪律 | 代码层无删除/gc 调用；输出标注 `applied: false` | 静态扫描：无 `git gc`/`git prune` 执行；动态：仓库无变化 | ✅ M3（`audit/git.py` 无 `subprocess`；`applied:false` 断言；审计前后元数据清单不变） |
-| 隔离区 `.trash/<batch-id>/` + manifest + 一键撤销 | 本题设计；`shutil.move` | CLI 子命令 | 撤销后 tree digest 一致；中断恢复用例 | ⬜ 待 M4 |
-| 永不 `rm -rf`、无"一键清理全部" | 产品纪律 | 代码与 CLI 均无此路径 | 静态扫描：无 `rm -rf`/`shutil.rmtree`；CLI 无全选参数 | ⬜ 待 M4（M1 已加：扫描层不产生删除调用） |
+| 隔离区 `.trash/<batch-id>/` + manifest + 一键撤销 | 本题设计；`shutil.move` | CLI 子命令 | 撤销后 tree digest 一致；中断恢复用例 | ✅ M4（`bench_clean.py` 往返 digest 一致；中断恢复用例通过；manifest 状态机 `pending→moving→moved` / `moved→restoring→restored`） |
+| 永不 `rm -rf`、无"一键清理全部" | 产品纪律 | 代码与 CLI 均无此路径 | 静态扫描：无 `rm -rf`/`shutil.rmtree`/`shutil.copy*`；CLI 无全选参数 | ✅ M4（`test_quarantine_never_deletes_and_never_copies`、`test_cli_has_no_select_all_for_clean`、`test_clean_requires_explicit_selection_in_source` 常驻） |
 | 单文件中文 HTML 报告（体积排行/项目与类型聚合/可删合计） | 标准库模板 | 报告文件随仓生成 | 报告无外部 URL；合计与排行对真值；断网可读 | ⬜ 待 M5 |
 | 合成目录树 + 植入真值（已知分级与总体积） | 本题自制（假项目名/假体积） | 生成器随仓 | 程序化再生成；同种子一致；真值与引擎解耦 | ✅ M1（`--check` 位级一致；真值无 `observed_*`） |
 | 隐私红线：只扫路径/体积/mtime，零上传、零遥测 | 本题设计 | 仓库基建 + 运行时 | 无网络调用扫描；真实审计结果与隔离区不入 git | ✅ M1（`test_source_has_no_network_imports` 常驻；`devdisk-out/` 不入仓） |

@@ -288,7 +288,7 @@ def test_truth_files_never_contain_observed_fields():
 def test_tools_scripts_are_executable_entrypoints():
     """tools/ 下的脚本必须能被 `py tools/x.py --help` 调用（无 import 期副作用）。"""
     for name in ("gen_synth_tree.py", "bench_scan.py", "bench_grade.py",
-                 "reference_grade.py", "bench_audit.py"):
+                 "reference_grade.py", "bench_audit.py", "bench_clean.py"):
         path = os.path.join(TOOLS_ROOT, name)
         assert os.path.isfile(path), name
         text = read_text(path)
@@ -335,3 +335,81 @@ def test_generated_git_truth_never_contains_observed_fields():
         for key in repo:
             assert not key.startswith("observed_"), key
         assert repo["expected_objects_bytes"] >= 0
+
+
+# ------------------------------------------------------------------ M4 数据守门
+
+
+def test_quarantine_never_deletes_and_never_copies():
+    """产品纪律：隔离区只移动，不删除、不复制。
+
+    - `src/` 里不得出现 `shutil.rmtree` / `os.remove` / `os.unlink`（临时文件单点除外）；
+    - 隔离区模块不得出现 `shutil.copy*`（跨设备不得用"复制后删除"绕过）。
+    """
+    offenders = []
+    copy_offenders = []
+    for path in python_files(SRC_ROOT):
+        text = read_text(path)
+        basename = os.path.basename(path)
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if re.search(r"shutil\.copy(?:file|tree|2)?\b", line):
+                copy_offenders.append("%s:%d" % (path, lineno))
+            if basename == "quarantine.py" and re.search(
+                    r"shutil\.(?:move|copy)|os\.replace", line):
+                if "shutil.move" not in line:
+                    offenders.append("%s:%d %s" % (path, lineno, line.strip()))
+    assert copy_offenders == []
+    assert offenders == []
+
+
+def test_quarantine_is_same_device_only():
+    """跨设备必须拒绝：`quarantine.py` 必须比较 `st_dev` 且不提供复制回退。"""
+    text = read_text(os.path.join(SRC_ROOT, "quarantine.py"))
+    assert "st_dev" in text
+    assert "ensure_same_device" in text
+    assert "shutil.move" in text
+    assert "shutil.copytree" not in text
+
+
+def test_cli_has_no_select_all_for_clean():
+    """CLI 反射守门：clean/undo 不得出现全选参数。"""
+    import sys as _sys
+
+    _sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+    from devdisk.cli import build_parser
+
+    parser = build_parser()
+    forbidden = {"all", "everything", "clean-all", "yes-all", "select-all"}
+    seen = set()
+    for action in parser._actions:  # noqa: SLF001
+        choices = getattr(action, "choices", None)
+        if not isinstance(choices, dict):
+            continue
+        for name in ("clean", "undo"):
+            sub = choices.get(name)
+            if sub is None:
+                continue
+            for sub_action in sub._actions:  # noqa: SLF001
+                for option in sub_action.option_strings:
+                    seen.add(option)
+                    for bad in forbidden:
+                        assert "--%s" % bad != option, (name, option)
+    assert "--select" in seen
+
+
+def test_clean_requires_explicit_selection_in_source():
+    """实现守门：`run_clean` 在无选择时必须走 REFUSED，不得回退到"全部候选"。"""
+    text = read_text(os.path.join(SRC_ROOT, "pipeline.py"))
+    assert "本工具不提供" in text and "全选" in text
+    assert "exit_code=exit_codes.REFUSED" in text
+    # 不得出现"没有选择就取全部候选"的写法。
+    assert "candidates if not select" not in text
+    assert "select or [candidate" not in text
+
+
+def test_clean_and_undo_are_documented_in_plan():
+    """文档口径：M4 落地后 `plan/05` 退役表与 README 状态行必须同步。"""
+    plan05 = read_text(os.path.join(REPO_ROOT, "plan", "05-里程碑与发布.md"))
+    assert "clean` | ✅ 已退役（M4）" in plan05 or "已退役（M4）" in plan05
+    readme = read_text(os.path.join(REPO_ROOT, "README.md"))
+    assert "M4" in readme

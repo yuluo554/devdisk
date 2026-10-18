@@ -12,12 +12,14 @@
 - 永不 `rm -rf`：清理 = 移动到 `.trash/<batch-id>/`，`undo` 逐字节恢复
 - `.git` 只读：只统计体积与对象数，最多建议 `git gc`，从不执行
 
-**状态**：v0.1.0 · M3 只读审计已落地（M1 扫描 + M2 分级 + M3 Docker 与 `.git` 审计）。
+**状态**：v0.1.0 · M4 隔离与回滚已落地（M1 扫描 + M2 分级 + M3 Docker 与 `.git` 审计 + M4 清理与撤销）。
 `scan` 输出**扫描事实**（类型 / 体积 / mtime / 项目根 / 跳过原因）与**分级结论**
 （`grade` / `reason` / `evidence`，`totals.by_grade` 三级体积合计）；
 分级判定来自数据文件 `data/rules/grades.json`，引擎零硬编码规则。
 `audit` 输出 Docker 四类体积与 `.git` 对象统计（只读；建议命令固定 `applied: false`）。
-`clean` / `undo` / `report` 仍返回退出码 `3`（未就绪），退役表见 `plan/05-里程碑与发布.md` §三。
+`clean` 默认 dry-run，`--apply --yes` 才移动到 `.trash/<batch-id>/` 并写 manifest；
+`undo` 按 manifest 逆序恢复，往返都校验 tree digest。
+`report` 仍返回退出码 `3`（未就绪），退役表见 `plan/05-里程碑与发布.md` §三。
 
 ## 定位与边界（如实说明）
 
@@ -62,11 +64,15 @@ devdisk audit --docker-fixture data/fixtures/docker_system_df/v24_standard.txt -
 # 生成单文件中文报告（M5 落地后可用）
 devdisk report --input devdisk-out/scan.json --audit devdisk-out/audit.json --html devdisk-out/report.html
 
-# 清理（默认 dry-run，M4 落地后可用）
+# 清理（默认 dry-run，只打印将移动什么）
 devdisk clean --from devdisk-out/scan.json --select ~/code/demo-web/node_modules
 
-# 撤销一个批次
-devdisk undo 20261018-120000-a1b2c3
+# 真正移动（必须显式确认；无"全选"参数）
+devdisk clean --from devdisk-out/scan.json \
+  --select ~/code/demo-web/node_modules --apply --yes
+
+# 撤销一个批次（按 manifest 逆序恢复，逐条校验 tree digest）
+devdisk undo 20261018-120000-a1b2c3 --trash ~/code/.trash
 ```
 
 `python -m devdisk <command>` 与裸 `devdisk <command>` 等价。
@@ -77,8 +83,8 @@ devdisk undo 20261018-120000-a1b2c3
 |---|---|---|
 | `devdisk scan <root>...` | 扫描并分级（M1 起扫描，M2 起带分级） | `--out`、`--format json/csv`、`--min-bytes`、`--keep`、`--config` |
 | `devdisk audit` | Docker / `.git` 只读审计 | `--root`（可重复）、`--docker`、`--docker-fixture`、`--git`、`--out`、`--config` |
-| `devdisk clean` | 选中项移入隔离区 | `--from`、`--select`（可重复）、`--apply`、`--yes`、`--trash` |
-| `devdisk undo <batch-id>` | 按 manifest 逆序移回 | `--trash`、`--yes` |
+| `devdisk clean` | 选中项移入隔离区 | `--from`、`--select`（可重复）、`--apply`、`--yes`、`--trash`、`--resume`、`--out` |
+| `devdisk undo <batch-id>` | 按 manifest 逆序移回 | `--trash`、`--yes`、`--stop-on-conflict` / `--continue-on-conflict`、`--out` |
 | `devdisk report` | 生成单文件 HTML 报告 | `--input`、`--audit`、`--html`、`--top` |
 
 | 退出码 | 名称 | 含义 |
@@ -97,8 +103,14 @@ devdisk undo 20261018-120000-a1b2c3
 - **不跟随符号链接**：`lstat` 判定，越界目标记 `skipped:outside_root`，环形链接不进入。
 - **物理对象去重**：`(st_dev, st_ino)` 为键，硬链接与重复挂载只计一次。
 - **证据门槛**：`safe` 必须有可核查证据；命中安全规则却取不到证据、或候选子树有读不全的目录 → 降级"谨慎"，绝不默认"安全可删"。
-- **跨设备拒绝**：隔离区与源目录不同文件系统时直接报错，不用"复制后删除"绕过。
-- **撤销校验**：移动前后计算 tree digest（相对路径 + 字节数 + 文件 sha256），不一致即报冲突。
+- **跨设备拒绝**：隔离区与源目录不同文件系统时直接报错（退出码 5），不用"复制后删除"绕过；
+  源码里不存在 `shutil.copy*` 回退路径（静态守门）。
+- **撤销校验**：移动前后计算 tree digest（类型前缀 + 相对路径 + 字节数 + 文件 sha256；
+  含空目录与链接目标，不含 mtime），不一致即冲突，不覆盖。
+- **隔离区可回滚**：`clean` 默认 dry-run（不建目录、不落盘），`--apply --yes` 才移动；
+  manifest 状态机 `pending → moving → moved`，中断后 `--resume` 可续做。
+- **隔离区不被重扫**：`.trash` 已在忽略规则里；自定义 `--trash` 落在扫描根内却未被忽略 → 退出码 5。
+- **禁止项永不清理**：分级为 `forbidden` 的条目（典型是 `.git`）直接拒绝，退出码 5。
 - **`.git` 只读**：不删除、不移动、不执行 `git gc`；审计前后对 `.git` 做元数据快照并断言未变化。
 - **Docker 只读**：只调用 `docker system df`；清理命令只生成，固定 `applied: false`。
   Docker 缺失/超时 → `skipped:docker_unavailable` / `skipped:docker_timeout`（退出码 4）；
@@ -145,6 +157,10 @@ py -X utf8 -m devdisk audit --root devdisk-out/synth --git \
 
 # 基准：审计门（Docker fixture 逐字段 + .git 三值 + 前后无变化 + applied:false）
 py -X utf8 tools/bench_audit.py --tree devdisk-out/synth
+
+# M4：隔离区往返基准（在临时副本上跑，不动 devdisk-out/synth 本体）
+# 清理 → 撤销 → 逐条 digest 比对；中断恢复；dry-run 只读；未选择退出码 1
+py -X utf8 tools/bench_clean.py --tree devdisk-out/synth
 ```
 
 类型 / 忽略 / 分级三张规则表都是**单点数据文件**
