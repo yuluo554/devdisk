@@ -18,7 +18,7 @@ REQUIRED_COMMANDS = ("scan", "audit", "clean", "undo", "report")
 REQUIRED_EXIT_CODES = ("OK", "REFUSED", "USAGE", "NOT_READY", "DEGRADED", "UNSAFE")
 
 # 已退役 NOT_READY、必须真正可用的子命令（每棒追加）。
-RETIRED_COMMANDS = ("scan", "audit", "clean", "undo")
+RETIRED_COMMANDS = ("scan", "audit", "clean", "undo", "report")
 
 
 def run_selftest(parser):
@@ -54,6 +54,7 @@ def run_selftest(parser):
     problems.extend(_check_grade_rules())
     problems.extend(_check_audit_invariants())
     problems.extend(_check_quarantine_invariants())
+    problems.extend(_check_report_invariants())
 
     if problems:
         for problem in problems:
@@ -319,5 +320,101 @@ def _check_quarantine_invariants():
             problems.append("dry-run 意外失败：%s" % exc)
         if os.path.lexists(dry_trash):
             problems.append("dry-run 创建了隔离区目录（应只读）")
+
+    return problems
+
+
+def _check_report_invariants():
+    """M5 不变量：零外链、全量转义、双跑逐字节一致、区块顺序固定。
+
+    全部在内存里用一份最小 scan 载荷完成，离线可跑。
+    """
+    import tempfile
+
+    from . import exit_codes as codes
+    from . import model as model_mod
+    from . import pipeline as pipeline_mod
+    from . import report as report_mod
+    from .serialize import write_json_atomic
+
+    problems = []
+
+    # 刻意塞入需要转义的样本：路径、理由、证据三处都要被 escape。
+    hostile = 'demo-web/evil <b>&"</b>'
+    payload = {
+        "schema_version": 1,
+        "generated_by": "devdisk selftest",
+        "roots": [hostile],
+        "candidates": [{
+            "path": hostile + "/node_modules",
+            "type": "node_modules",
+            "bytes": 2048,
+            "mtime_utc": "1970-01-01T00:00:01Z",
+            "project_root": hostile,
+            "is_symlink": False,
+            "symlink_kind": "none",
+            "file_count": 1,
+            "directory_count": 0,
+            "grade": model_mod.GRADE_SAFE,
+            "reason": '可重建 <script>alert("x")</script>',
+            "evidence": [{"kind": "lockfile", "path": "package-lock.json",
+                          "detail": "锁文件 <存在> & 可解析"}],
+        }],
+        "skipped": [],
+        "totals": {
+            "candidate_bytes": 2048,
+            "candidate_count": 1,
+            "by_type": {"node_modules": 2048},
+            "by_grade": {model_mod.GRADE_SAFE: 2048,
+                         model_mod.GRADE_CAUTION: 0,
+                         model_mod.GRADE_FORBIDDEN: 0},
+            "other_bytes": 0,
+            "other_count": 0,
+            "ignored_count": 0,
+            "skipped_count": 0,
+        },
+    }
+
+    with tempfile.TemporaryDirectory(prefix="devdisk-selftest-report-") as temp_dir:
+        scan_path = os.path.join(temp_dir, "scan.json")
+        write_json_atomic(scan_path, payload)
+        first = os.path.join(temp_dir, "a.html")
+        second = os.path.join(temp_dir, "b.html")
+        try:
+            code, _, _ = pipeline_mod.run_report(scan_path, first)
+            if code != codes.OK:
+                problems.append("报告生成未返回 OK（实际 %s）" % code)
+            code, _, _ = pipeline_mod.run_report(scan_path, second)
+            if code != codes.OK:
+                problems.append("报告二次生成未返回 OK（实际 %s）" % code)
+        except Exception as exc:  # noqa: BLE001 - 自检要把异常转成 FAIL 行
+            problems.append("报告生成异常：%s" % exc)
+            return problems
+
+        try:
+            with open(first, "r", encoding="utf-8") as handle:
+                text = handle.read()
+            with open(second, "r", encoding="utf-8") as handle:
+                again = handle.read()
+        except OSError as exc:
+            problems.append("报告无法读回：%s" % exc)
+            return problems
+
+        if text != again:
+            problems.append("同一输入两次生成的报告不是逐字节一致")
+
+        try:
+            report_mod.assert_no_external_resources(text)
+        except report_mod.ReportError as exc:
+            problems.append("报告零外链断言失败：%s" % exc)
+
+        if "<script>alert(" in text:
+            problems.append("报告未转义脚本样本（原因字段未被 escape）")
+        if 'evil <b>' in text:
+            problems.append("报告未转义路径样本（路径未被 escape）")
+
+        order = [section for section in report_mod.SECTION_ORDER if 'id="%s"' % section in text]
+        if list(order) != list(report_mod.SECTION_ORDER):
+            problems.append("报告区块顺序不符：%r" % (order,))
 
     return problems

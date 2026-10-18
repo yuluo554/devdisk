@@ -5,10 +5,10 @@
 `audit` 是独立的只读路径：`roots --audit--> audit.json`（Docker + `.git`）；
 `clean` / `undo` 走隔离区：`scan.json --clean--> .trash/<batch>/manifest.json --undo--> 恢复`。
 M1 落地 `run_scan()`，M2 追加 `run_grade()`，M3 追加 `run_audit()`，M4 追加
-`run_clean()` / `run_undo()`。
+`run_clean()` / `run_undo()`，M5 追加 `run_report()`。
 
-纪律：本层不含分级/审计判定（在 `grader.py` / `audit/`），也不做 HTML 渲染（M5），
-只做"校验输入 → 调用下层 → 组装契约 → 写盘"。
+纪律：本层不含分级/审计判定（在 `grader.py` / `audit/`），也不做 HTML 渲染
+（在 `report.py`），只做"校验输入 → 调用下层 → 组装契约 → 写盘"。
 """
 
 import csv
@@ -24,6 +24,7 @@ from . import exit_codes
 from . import manifest as manifest_mod
 from . import model
 from . import quarantine
+from . import report as report_mod
 from .audit import DEGRADED_STATUSES
 from .audit import STATUS_GIT_MUTATED
 from .audit import STATUS_NOT_REQUESTED
@@ -1148,3 +1149,48 @@ def _undo_summary_lines(payload):
                      "已完成条目已保留。" % len(conflicts))
     lines.append("批次状态：%s" % payload.get("state"))
     return lines
+
+
+# ---------------------------------------------------------------- 模块⑤：报告
+#
+# 报告层是**单一渲染源**（`plan/02` §6.5）：
+#   scan.json（必需）+ audit.json（可选）+ 隔离批次 manifest（可选） → 一个 HTML。
+# 本函数只做"读入 → 校验 → 交给 report 渲染 → 原子写"，不含任何判定。
+
+REPORT_SCHEMA_VERSION = 1
+
+
+def run_report(input_path, html_path, audit_path=None, top=None, as_of=None,
+               batches=None, trash=None):
+    """生成单文件 HTML 报告，返回 `(exit_code, stats, summary_lines)`。
+
+    退出码：0 正常；2 输入缺失/损坏或输出不可写（`ScanError` 携带）。
+    """
+    if not html_path:
+        raise ScanError("缺少 `--html <out.html>`。下一步：指定报告输出路径。")
+
+    try:
+        payload = report_mod.load_scan(input_path)
+        audit, audit_note = report_mod.load_audit(audit_path)
+        batch_payloads = report_mod.load_batches(batches or [], trash=trash)
+        stats = report_mod.aggregate(payload, top=top)
+        document = report_mod.render_html(
+            payload, audit=audit, batches=batch_payloads, top=top, as_of=as_of,
+            audit_note=audit_note,
+            batch_note=("%d 个（来源：%s）" % (len(batch_payloads), trash)
+                        if trash else None))
+    except report_mod.ReportError as exc:
+        raise ScanError(str(exc), exit_code=exc.exit_code)
+
+    target = os.path.abspath(html_path)
+    try:
+        write_text_atomic(target, document)
+    except OSError as exc:
+        raise ScanError(
+            "报告写盘失败：%s（%s）。下一步：确认输出目录可写，或用 `--html` 指定其他路径。"
+            % (target, exc))
+
+    lines = report_mod.summary_lines(
+        stats, audit, target, top=top, batches=batch_payloads)
+    return exit_codes.OK, stats, lines
+

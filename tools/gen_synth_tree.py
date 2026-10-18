@@ -508,6 +508,61 @@ def build_root_sample(builder):
                    "扫描根本身不可作为清理目标")
 
 
+def build_report_expect(manifest):
+    """由真值样本推导报告期望聚合值（`plan/04` §五）。
+
+    只做**累加与排序**，不复用报告层的任何实现：报告的每一项聚合值都在
+    这里独立算一遍，测试拿它对账报告输出。
+    """
+    entries = {}
+    for sample in manifest["samples"]:
+        rel_path = sample["rel_path"]
+        if rel_path == "":
+            continue  # 扫描根本身不是候选
+        entries[rel_path] = {
+            "bytes": sample["expected_bytes"],
+            "grade": sample["expected_grade"],
+            "type": sample["type"],
+            "project": sample["project_root_rel"],
+        }
+    for scale in manifest["scale_samples"]:
+        for index in range(scale["count"]):
+            rel_path = "%s%04d" % (scale["prefix"], index)
+            if rel_path in entries:
+                continue
+            entries[rel_path] = {
+                "bytes": scale["expected_bytes_each"],
+                "grade": "safe",
+                "type": scale["type"],
+                "project": rel_path.split("/")[0],
+            }
+
+    by_grade = {"safe": 0, "caution": 0, "forbidden": 0}
+    by_type = {}
+    by_project = {}
+    for entry in entries.values():
+        by_grade[entry["grade"]] += entry["bytes"]
+        by_type[entry["type"]] = by_type.get(entry["type"], 0) + entry["bytes"]
+        key = entry["project"] if entry["project"] is not None else ""
+        by_project[key] = by_project.get(key, 0) + entry["bytes"]
+
+    ordered = sorted(entries.items(), key=lambda item: (-item[1]["bytes"], item[0]))
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "source_truth": "truth/manifest.json",
+        "expected_totals": {
+            "candidate_count": len(entries),
+            "candidate_bytes": sum(entry["bytes"] for entry in entries.values()),
+            "reclaimable_bytes": by_grade["safe"] + by_grade["caution"],
+            "by_grade": by_grade,
+            "by_type": by_type,
+            "by_project": by_project,
+        },
+        # 跳过条数与平台相关（权限样本只在 POSIX 构造），不作为报告真值。
+        "expected_top_order": [rel_path for rel_path, _ in ordered[:50]],
+    }
+
+
 def build_tree(out_dir, seed):
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
@@ -549,9 +604,18 @@ def build_tree(out_dir, seed):
     }
     with open(truth_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(manifest, sort_keys=True, ensure_ascii=False, indent=2) + "\n")
+
+    # M5：报告期望聚合值，与真值同一次运行写出（`plan/04` §五）。
+    report_expect = build_report_expect(manifest)
+    report_path = os.path.join(truth_dir, "report_expect.json")
+    with open(report_path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(report_expect, sort_keys=True, ensure_ascii=False,
+                                indent=2) + "\n")
+
+    # 两个真值文件都写完后统一回拨时间戳（含 truth 目录本身），保证 `--check` 稳定。
     stamp = float(BASE_EPOCH)
-    os.utime(truth_path, (stamp, stamp))
-    os.utime(truth_dir, (stamp, stamp))
+    for path in (truth_path, report_path, truth_dir):
+        os.utime(path, (stamp, stamp))
     return manifest
 
 

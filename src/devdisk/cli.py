@@ -17,9 +17,8 @@ from .encoding import ensure_utf8_stdio
 PROG = "devdisk"
 
 # 骨架期未实现的子命令；能力落地那一棒必须同轮从本表移除并补离线冒烟。
-NOT_READY_COMMANDS = {
-    "report": "M5（单文件 HTML 报告）",
-}
+# M5 收口后本表为空：五个子命令全部落地，`NOT_READY` 仅保留退出码语义。
+NOT_READY_COMMANDS = {}
 
 
 def build_parser():
@@ -86,6 +85,12 @@ def build_parser():
     report.add_argument("--audit", default=None, metavar="<audit.json>", help="审计结果路径")
     report.add_argument("--html", required=True, metavar="<out.html>", help="报告输出路径")
     report.add_argument("--top", type=int, default=50, help="体积排行条数（默认 50）")
+    report.add_argument("--as-of", dest="as_of", default=None, metavar="<text>",
+                        help="固定展示的基准时间（默认不显示时间）")
+    report.add_argument("--batch", action="append", default=[], metavar="<manifest.json>",
+                        help="隔离批次 manifest，可重复（默认不展示批次）")
+    report.add_argument("--trash", default=None, metavar="<dir>",
+                        help="从隔离区目录读取 <dir>/*/manifest.json")
 
     subparsers.add_parser("selftest", help="自检：校验交付态不变量")
 
@@ -217,6 +222,34 @@ def _run_undo(args):
     return code
 
 
+def _run_report(args):
+    """report 子命令：只做参数传递与退出码映射（渲染在 report.py）。"""
+    from . import pipeline
+
+    try:
+        code, _stats, lines = pipeline.run_report(
+            input_path=args.input,
+            html_path=args.html,
+            audit_path=args.audit,
+            top=args.top,
+            as_of=args.as_of,
+            batches=args.batch,
+            trash=args.trash,
+        )
+    except pipeline.ScanError as exc:
+        sys.stderr.write("%s：%s\n" % (PROG, exc))
+        return exc.exit_code
+    except OSError as exc:
+        sys.stderr.write(
+            "%s：写盘失败：%s\n下一步：确认输出目录可写，或用 `--html` 指定其他路径。\n"
+            % (PROG, exc)
+        )
+        return exit_codes.USAGE
+
+    _emit(lines)
+    return code
+
+
 def main(argv=None):
     ensure_utf8_stdio()
     parser = build_parser()
@@ -250,6 +283,9 @@ def main(argv=None):
 
     if args.command == "undo":
         return _run_undo(args)
+
+    if args.command == "report":
+        return _run_report(args)
 
     if args.command in NOT_READY_COMMANDS:
         return _not_ready(args.command)

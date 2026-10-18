@@ -2,6 +2,7 @@
 """CLI 契约测试：退出码、子命令面、骨架期语义。"""
 
 import io
+import json
 import os
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -45,16 +46,49 @@ def test_unknown_command_is_usage_error():
     assert code == exit_codes.USAGE
 
 
-@pytest.mark.parametrize("command", sorted(cli.NOT_READY_COMMANDS))
-def test_skeleton_commands_report_not_ready(command):
-    argv = {"audit": ["audit"],
-            "clean": ["clean"],
-            "undo": ["undo", "20261018-120000-a1b2c3"],
-            "report": ["report", "--input", "x.json", "--html", "x.html"]}[command]
-    code, _, err = run_cli(argv)
-    assert code == exit_codes.NOT_READY
-    assert command in err
-    assert "下一步" in err
+def test_no_command_is_left_not_ready():
+    """M5 收口：五个子命令全部落地，NOT_READY 表必须为空。"""
+    assert cli.NOT_READY_COMMANDS == {}
+
+
+def test_report_is_retired_from_not_ready():
+    """M5 退役：report 不得再出现在 NOT_READY 表里，且具备真实参数面。"""
+    assert "report" not in cli.NOT_READY_COMMANDS
+    parser = cli.build_parser()
+    for action in parser._actions:  # noqa: SLF001
+        choices = getattr(action, "choices", None)
+        if isinstance(choices, dict):
+            assert "report" in choices
+
+
+def test_report_offline_smoke(tmp_path):
+    """report 退役后的离线冒烟：生成 HTML，退出码 0，零外链。"""
+    from devdisk import report
+
+    scan = tmp_path / "scan.json"
+    scan.write_text(json.dumps({
+        "schema_version": 1, "generated_by": "devdisk test", "roots": [str(tmp_path)],
+        "candidates": [{
+            "path": str(tmp_path / "demo-web" / "node_modules"), "type": "node_modules",
+            "bytes": 1024, "mtime_utc": "1970-01-01T00:00:01Z",
+            "project_root": str(tmp_path / "demo-web"), "is_symlink": False,
+            "symlink_kind": "none", "file_count": 1, "directory_count": 0,
+            "grade": "safe", "reason": "锁文件存在", "evidence": [
+                {"kind": "lockfile", "path": "package-lock.json", "detail": "存在"}]}],
+        "skipped": [],
+        "totals": {"candidate_bytes": 1024, "candidate_count": 1,
+                   "by_type": {"node_modules": 1024},
+                   "by_grade": {"safe": 1024, "caution": 0, "forbidden": 0},
+                   "other_bytes": 0, "other_count": 0, "ignored_count": 0,
+                   "skipped_count": 0},
+    }, ensure_ascii=False), encoding="utf-8")
+    html = tmp_path / "report.html"
+
+    code, stdout, stderr = run_cli(["report", "--input", str(scan), "--html", str(html)])
+    assert code == exit_codes.OK, stderr
+    assert "报告已生成" in stdout
+    text = html.read_text(encoding="utf-8")
+    assert report.assert_no_external_resources(text) == text
 
 
 def test_scan_is_retired_from_not_ready():

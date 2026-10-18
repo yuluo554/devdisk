@@ -3,7 +3,7 @@
 - 性质：不参赛项目题 · 发布 GitHub **公开仓库** · 署名 yuluo554
 - 定位宣言："开发者磁盘被 node_modules/.venv/构建产物/Docker 镜像缓存/大 .git 对象吃掉，但没人敢删——本工具按'可重建性 + 最后修改时间 + 依赖关系'给出**分级可删清单**，默认只出报告、清理必须显式确认、删除走隔离区可回滚。**安全分级与中文界面是差异化**：已有工具覆盖了多数目录类型，但没人把 Docker 与 .git 纳入统一的安全分级，也没人把'误删的代价'做成可回滚。"
 - 交付形态：**纯本地 Python CLI + 本地单文件 HTML 报告**（唯一形态）；无服务器、无 GPU、无网络。
-- 下一棒：M5 报告与收口（入口 `plan/HANDOFF-M5.md`；说"继续"默认从该文件开工）。
+- 下一棒：M6 发布（入口 `plan/HANDOFF-M6.md`；说"继续"默认从该文件开工）。
 
 ## 文档索引表
 
@@ -20,7 +20,8 @@
 | plan/HANDOFF-M2.md | 下一棒（M2 安全分级）的交接快照 | ✅ M1 |
 | plan/HANDOFF-M3.md | 下一棒（M3 Docker 与 .git 只读审计）的交接快照 | ✅ M2 |
 | plan/HANDOFF-M4.md | 下一棒（M4 隔离与回滚）的交接快照 | ✅ M3 |
-| plan/HANDOFF-M5.md | 下一棒（M5 报告与收口）的交接快照 | ✅ M4 |
+| plan/HANDOFF-M5.md | M5（报告与收口）的交接快照 | ✅ M4 |
+| plan/HANDOFF-M6.md | 下一棒（M6 发布）的交接快照 | ✅ M5 |
 | data/README.md | 依据查证记录 + 数据源可获取性 + 合成与口径纪律 | ✅ v1 |
 | .gitignore / .gitattributes | 运行时产物不入仓；源码 LF、二进制不归一 | ✅ v1 |
 | pyproject.toml / src/ / tests/ / tools/ | 可安装骨架、CLI 契约、纪律守门 | ✅ M0 |
@@ -31,6 +32,8 @@
 | tools/bench_grade.py + tools/reference_grade.py | 分级基准与分级规则的独立参照实现（M2） | ✅ M2 |
 | src/devdisk/audit/ + tools/bench_audit.py | Docker 与 `.git` 只读审计 + fixture/合成仓库双边基准（M3） | ✅ M3 |
 | src/devdisk/quarantine.py + manifest.py + digest.py | 批次 ID、同文件系统校验、manifest 状态机、tree digest 完整性校验（M4） | ✅ M4 |
+| src/devdisk/report.py | 单文件 HTML 报告（单一渲染源、零外链出口断言、全量转义、10 段固定顺序，M5） | ✅ M5 |
+| tools/bench_report.py | 报告基准（真值聚合 + 从 HTML 读回数值 + 零外链 + 双跑一致 + 转义/降级），M5 | ✅ M5 |
 | tools/bench_clean.py | 隔离区往返基准（清理→撤销 digest 一致）+ 中断恢复 + dry-run 只读（M4） | ✅ M4 |
 | data/fixtures/docker_system_df/ | Docker `system df` 固定文本 fixture + 手写真值 `expect.json`（M3） | ✅ M3 |
 | .github/workflows/ci.yml | CI 矩阵（windows/ubuntu × 3.8/3.12） | ✅ M0（待首推验证） |
@@ -73,6 +76,10 @@
 | 2026-10-18 | M4：隔离区在扫描根内时必须被忽略规则命中（默认 `.trash`） | 否则"清理 → 重扫又发现 → 再清理"形成假循环。自定义 `--trash` 若落在根内且未被忽略，直接退出码 5，而不是静默允许。 |
 | 2026-10-18 | M4：撤销默认 `--stop-on-conflict`（整体停止），可显式改 `--continue-on-conflict` | 默认停止保护"用户没看到的后续条目"；继续模式留给"已知冲突、只想救回其余"的场景。两种模式都必须保持"不覆盖"与"已完成条目保留"。 |
 | 2026-10-18 | M4：`tree_digest` 不含 mtime，含空目录与链接目标 | 移动会改时间戳，但内容与结构不变；空目录是结构事实（撤销后必须还原）；链接目标字符串不跟随，避免把隔离区外的内容卷入校验。 |
+| 2026-10-18 | M5：报告是**单一渲染源**，聚合只从输入 JSON 累加，页面 JS 只做筛选/排序 | `data/README.md` §四 第 14 条要求报告不再二次计算；`report.py` 不 import `grader`/`rules`，测试断言报告模块无分级引擎引用。 |
+| 2026-10-18 | M5：零外链断言放在 `render_html()` 的**出口**，不是测试里的"事后检查" | 出口断言保证"写出的字节一定通过检查"；变异验证证明摘掉它会有 4 个测试变红。扫描包含 `http(s)://` 字面量，防止 JS 常量里混入 CDN。 |
+| 2026-10-18 | M5：报告真值 `truth/report_expect.json` 随合成树生成（不入仓），由 `build_report_expect()` 独立推导 | 与 `manifest.json` 同一次生成，且**不复用** `report.py` 实现；否则"报告自己验自己"。基准从渲染后的 HTML 的 `data-value` 读回数值。 |
+| 2026-10-18 | M5：`--as-of` 是唯一时间来源；默认报告不含任何时间 | 生成时刻会让双跑逐字节一致的断言失效；`--as-of` 让"需要展示时间"的场景可复现。 |
 
 ## 承诺-证据台账
 
@@ -89,7 +96,7 @@
 | `.git` 永不自动处理、只建议 `git gc` | 产品纪律 | 代码层无删除/gc 调用；输出标注 `applied: false` | 静态扫描：无 `git gc`/`git prune` 执行；动态：仓库无变化 | ✅ M3（`audit/git.py` 无 `subprocess`；`applied:false` 断言；审计前后元数据清单不变） |
 | 隔离区 `.trash/<batch-id>/` + manifest + 一键撤销 | 本题设计；`shutil.move` | CLI 子命令 | 撤销后 tree digest 一致；中断恢复用例 | ✅ M4（`bench_clean.py` 往返 digest 一致；中断恢复用例通过；manifest 状态机 `pending→moving→moved` / `moved→restoring→restored`） |
 | 永不 `rm -rf`、无"一键清理全部" | 产品纪律 | 代码与 CLI 均无此路径 | 静态扫描：无 `rm -rf`/`shutil.rmtree`/`shutil.copy*`；CLI 无全选参数 | ✅ M4（`test_quarantine_never_deletes_and_never_copies`、`test_cli_has_no_select_all_for_clean`、`test_clean_requires_explicit_selection_in_source` 常驻） |
-| 单文件中文 HTML 报告（体积排行/项目与类型聚合/可删合计） | 标准库模板 | 报告文件随仓生成 | 报告无外部 URL；合计与排行对真值；断网可读 | ⬜ 待 M5 |
+| 单文件中文 HTML 报告（体积排行/项目与类型聚合/可删合计） | 标准库模板 | 报告文件随仓生成 | 报告无外部 URL；合计与排行对真值；断网可读 | ✅ M5（`bench_report.py` + `tests/test_report.py`） |
 | 合成目录树 + 植入真值（已知分级与总体积） | 本题自制（假项目名/假体积） | 生成器随仓 | 程序化再生成；同种子一致；真值与引擎解耦 | ✅ M1（`--check` 位级一致；真值无 `observed_*`） |
 | 隐私红线：只扫路径/体积/mtime，零上传、零遥测 | 本题设计 | 仓库基建 + 运行时 | 无网络调用扫描；真实审计结果与隔离区不入 git | ✅ M1（`test_source_has_no_network_imports` 常驻；`devdisk-out/` 不入仓） |
 | 与 kondo/npkill 能力重叠如实标注 | 基准日检索快照 + README 原文 | 题面 §六 与 README | 文档核对：含重叠清单，无"首创/空白"措辞 | ⬜ 待 M6 |

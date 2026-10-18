@@ -12,14 +12,17 @@
 - 永不 `rm -rf`：清理 = 移动到 `.trash/<batch-id>/`，`undo` 逐字节恢复
 - `.git` 只读：只统计体积与对象数，最多建议 `git gc`，从不执行
 
-**状态**：v0.1.0 · M4 隔离与回滚已落地（M1 扫描 + M2 分级 + M3 Docker 与 `.git` 审计 + M4 清理与撤销）。
+**状态**：v0.1.0 · M5 报告与收口已落地（M1 扫描 + M2 分级 + M3 Docker 与 `.git` 审计 + M4 清理与撤销 + M5 单文件报告）。
 `scan` 输出**扫描事实**（类型 / 体积 / mtime / 项目根 / 跳过原因）与**分级结论**
 （`grade` / `reason` / `evidence`，`totals.by_grade` 三级体积合计）；
 分级判定来自数据文件 `data/rules/grades.json`，引擎零硬编码规则。
 `audit` 输出 Docker 四类体积与 `.git` 对象统计（只读；建议命令固定 `applied: false`）。
 `clean` 默认 dry-run，`--apply --yes` 才移动到 `.trash/<batch-id>/` 并写 manifest；
 `undo` 按 manifest 逆序恢复，往返都校验 tree digest。
-`report` 仍返回退出码 `3`（未就绪），退役表见 `plan/05-里程碑与发布.md` §三。
+`report` 生成**单文件中文 HTML**（内联 CSS/JS、零外链、断网可读）：体积排行、
+按类型/按项目聚合、分级分布与可删合计、候选明细（理由与证据）、Docker/.git 段
+（缺失时显式写"未审计"）、隔离批次与撤销说明。报告只消费既有 JSON，不重新扫描、
+不重新分级；同一输入两次生成逐字节一致。
 
 ## 定位与边界（如实说明）
 
@@ -61,8 +64,11 @@ devdisk audit --root ~/code --docker --git --out devdisk-out/audit.json
 # 离线复跑解析：用固定文本 fixture 代替真实 Docker（验收主路径）
 devdisk audit --docker-fixture data/fixtures/docker_system_df/v24_standard.txt --out devdisk-out/audit.json
 
-# 生成单文件中文报告（M5 落地后可用）
-devdisk report --input devdisk-out/scan.json --audit devdisk-out/audit.json --html devdisk-out/report.html
+# 生成单文件中文报告（M5）
+devdisk report --input devdisk-out/scan.json --audit devdisk-out/audit.json   --html devdisk-out/report.html --top 50
+
+# 报告里展示隔离批次（可选）：直接给 manifest，或让它读隔离区目录
+devdisk report --input devdisk-out/scan.json --html devdisk-out/report.html   --trash ~/code/.trash
 
 # 清理（默认 dry-run，只打印将移动什么）
 devdisk clean --from devdisk-out/scan.json --select ~/code/demo-web/node_modules
@@ -85,7 +91,7 @@ devdisk undo 20261018-120000-a1b2c3 --trash ~/code/.trash
 | `devdisk audit` | Docker / `.git` 只读审计 | `--root`（可重复）、`--docker`、`--docker-fixture`、`--git`、`--out`、`--config` |
 | `devdisk clean` | 选中项移入隔离区 | `--from`、`--select`（可重复）、`--apply`、`--yes`、`--trash`、`--resume`、`--out` |
 | `devdisk undo <batch-id>` | 按 manifest 逆序移回 | `--trash`、`--yes`、`--stop-on-conflict` / `--continue-on-conflict`、`--out` |
-| `devdisk report` | 生成单文件 HTML 报告 | `--input`、`--audit`、`--html`、`--top` |
+| `devdisk report` | 生成单文件 HTML 报告 | `--input`、`--audit`、`--html`、`--top`、`--as-of`、`--batch`（可重复）、`--trash` |
 
 | 退出码 | 名称 | 含义 |
 |---|---|---|
@@ -116,6 +122,11 @@ devdisk undo 20261018-120000-a1b2c3 --trash ~/code/.trash
   Docker 缺失/超时 → `skipped:docker_unavailable` / `skipped:docker_timeout`（退出码 4）；
   输出无法解析 → `error:docker_parse`（退出码 4，附原文摘录），不静默输出 0 体积。
 - **`audit` 全离线可验收**：`--docker-fixture` 直接喂固定文本，不要求本机安装 Docker。
+- **报告零外链**：内联 CSS/JS，无 CDN、无字体、无图片外链；渲染出口断言扫描
+  `<link href>`、`<script src>`、`url(//...)`、`@import` 与任何 `http(s)://` 字面量，
+  命中即拒绝写出（退出码 2）。
+- **报告只消费 JSON**：`report` 不重新扫描、不重新分级；路径/理由/证据全部 `html.escape`，
+  同一输入两次生成逐字节一致（不写生成时刻，需要时间用 `--as-of` 固定）。
 
 分级是**基于可观察证据的建议**，不是"删除后必然安全"的保证。重建成本需自行确认。
 
@@ -161,6 +172,12 @@ py -X utf8 tools/bench_audit.py --tree devdisk-out/synth
 # M4：隔离区往返基准（在临时副本上跑，不动 devdisk-out/synth 本体）
 # 清理 → 撤销 → 逐条 digest 比对；中断恢复；dry-run 只读；未选择退出码 1
 py -X utf8 tools/bench_clean.py --tree devdisk-out/synth
+
+# M5：报告（单文件 HTML，零外链）
+py -X utf8 -m devdisk report --input devdisk-out/scan.json   --audit devdisk-out/audit.json --html devdisk-out/report.html --top 50
+
+# 基准：报告数值对真值（从 HTML 读回）+ 零外链 + 双跑一致 + 转义/降级可见
+py -X utf8 tools/bench_report.py --tree devdisk-out/synth
 ```
 
 类型 / 忽略 / 分级三张规则表都是**单点数据文件**
