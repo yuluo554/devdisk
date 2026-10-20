@@ -31,8 +31,15 @@ DevDiskAudit v0.1.1
 校验
 ----
 
-发布物：`devdisk-0.1.1-src.tar.gz`（`git archive v0.1.1` + `gzip -9n`，确定性）。
-sha256 登记在 **Release 说明正文**（不写进包内文件，避免自指）。
+发布物：`devdisk-0.1.1-src.tar.gz`，**239609 字节**。
+
+发布物：`devdisk-0.1.1-src.tar.gz`，**239609 字节**。
+
+**sha256 登记在 Release 说明正文与 tag 消息里**（本文件在包内，故不写自身摘要——
+否则会形成自指循环：改一次摘要，包内容就变一次，摘要又失效）。
+
+由 `git archive --format=tar --prefix=devdisk-0.1.1/ v0.1.1 | gzip -9n` 生成
+（确定性：双跑同 sha256），与 tag 树逐文件一致（71 个文件）。
 
 ```bash
 # 与 tag 树同源（在自己的 clone 里复算）
