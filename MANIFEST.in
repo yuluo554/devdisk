@@ -1,0 +1,29 @@
+# sdist 资产清单（`python -m build --sdist` 的输入）。
+#
+# 纪律：本仓的**发布物**是手工源码包（`devdisk-<ver>-src.tar.gz`，与 tag 树逐文件一致），
+# 不是 `python -m build` 的产物。但 sdist 仍必须自足——否则走 sdist 渠道的人
+# 装完 `devdisk scan` 直接 exit 4，也跑不了 `tests/` 与 `tools/` 下的任何基准。
+
+include LICENSE
+include README.md
+include pyproject.toml
+include MANIFEST.in
+
+# `.gitignore` / `.gitattributes` 是**测试的输入**（忽略规则覆盖、LF 口径由 pytest 断言），
+# 不进 sdist 会让 tests/test_repo_discipline.py 与 tests/test_clean.py 直接 FileNotFoundError。
+include .gitignore
+include .gitattributes
+
+# 规则表与 Docker fixture：运行期与基准的输入，缺一即残包。
+recursive-include data/rules *
+recursive-include data/fixtures *
+include data/README.md
+
+# 基准与合成树生成器（`data/fixtures/docker_system_df/*.txt` 是 bench_audit 的输入）。
+recursive-include tools *.py *.md
+
+# 计划与发布留档。
+recursive-include plan *.md
+
+recursive-include tests *.py
+recursive-include src *.py

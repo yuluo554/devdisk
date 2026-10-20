@@ -163,19 +163,125 @@ def test_readme_declares_known_environment_issues():
 
     实测（M6 干净 clone + 全新 venv）：
     - 3.8 自带 pip 20.2.3 无法可编辑安装 pyproject-only 项目 → 需先升级 pip；
-    - 非 editable（wheel）安装后规则表不在包内 → 需 `DEVDISK_DATA_DIR`；
+    - **v0.1.1 起规则表随 wheel 分发**：非 editable 安装从任意 CWD 都可跑，
+      `DEVDISK_DATA_DIR` 退化为**覆盖**入口（旧缺陷"wheel 形态必须设环境变量"已修）；
     - Windows `py` 启动器会绕过 venv → 用 `python -m pip`。
     """
     readme = read_text(os.path.join(REPO_ROOT, "README.md"))
     assert "## 已知环境问题" in readme
-    for needle in ("DEVDISK_DATA_DIR", "python -m pip install -U pip", "py` 启动器"):
+    for needle in ("DEVDISK_DATA_DIR", "python -m pip install -U pip", "py` 启动器",
+                   "规则表随包分发"):
         assert needle in readme, needle
+
+
+def test_readme_no_longer_documents_wheel_degradation():
+    """DEC2=A 的反向守门：README 不得再出现"wheel 装完跑不了"的旧缺陷描述。
+
+    改前原文：`恰好这条描述**不是缺陷**而是披露，但如果只改代码不改文档/测试，
+    就等于把旧缺陷钉在新版本上。`
+    """
+    readme = read_text(os.path.join(REPO_ROOT, "README.md"))
+    for stale in ("不随 wheel 打包", "wheel 安装仅在设了该变量后可跑",
+                  "非 editable 安装找不到规则表"):
+        assert stale not in readme, stale
 
 
 def test_pyproject_declares_console_script():
     text = read_text(os.path.join(REPO_ROOT, "pyproject.toml"))
     assert "[project.scripts]" in text
     assert 'devdisk = "devdisk.cli:main"' in text
+
+
+def test_version_has_single_source():
+    """版本号只在 `pyproject.toml` 声明一次（v0.1.1 起两处字面值，必须相等）。
+
+    改前实测：`pyproject.toml` 是字面值，`src/devdisk/__init__.py` 另有 `__version__`——
+    两处不同步就会让 `devdisk --version` 与发布物元数据对不上（诊断 D1 的同族风险）。
+    """
+    import sys
+
+    pyproject = read_text(os.path.join(REPO_ROOT, "pyproject.toml"))
+    match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
+    assert match, "pyproject.toml 缺少字面量 version"
+    declared = match.group(1)
+
+    sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+    from devdisk import __version__
+
+    assert __version__ == declared, (__version__, declared)
+
+
+def test_readme_declares_release_artifact_is_handmade_source_package():
+    """D2(b)：README 必须写清"发布物是手工源码包"，且与 MANIFEST.in 的事实一致。
+
+    设计口径：`python -m build` 的 sdist **不是**发布形态；Release 附件由 `git archive <tag>` 打出。
+    """
+    readme = read_text(os.path.join(REPO_ROOT, "README.md"))
+    assert "发布物是手工源码包" in readme
+    assert "git archive" in readme
+
+
+def test_sdist_manifest_collects_data_assets():
+    """D2(a)：`MANIFEST.in` 必须把运行期数据与基准输入收进 sdist。
+
+    依据：改前实测 `tar -tzf dist/*.tar.gz` 里 `data/rules` / `data/fixtures` / `tools/` / `plan/`
+    的 `grep -c` 全为 0，即"走 sdist 渠道装完 `devdisk scan` 直接 exit 4"。
+    本测试只断言清单**声明**了这些路径（真构建在门禁里跑，见 `update/01-迭代路线.md` 批 1）。
+    """
+    manifest = read_text(os.path.join(REPO_ROOT, "MANIFEST.in"))
+    for needle in ("recursive-include data/rules", "recursive-include data/fixtures",
+                   "recursive-include tools", "recursive-include plan"):
+        assert needle in manifest, needle
+
+
+def test_wheel_distributes_rule_tables():
+    """DEC2=A：规则表必须随 wheel 分发（`pip install` 后任意 CWD 都能跑）。
+
+    实测依据（改前）：只装 wheel 的干净 venv + 中立 CWD → `scan` 报"找不到 data/rules/types.json" exit 4。
+    本测试钉住 packaging 配置这一层；"装完真能跑"由门禁里的 wheel-only venv 复验。
+    """
+    text = read_text(os.path.join(REPO_ROOT, "pyproject.toml"))
+    assert "[tool.setuptools.package-data]" in text
+    assert "rules/*" in text
+    assert "fixtures/docker_system_df/*" in text
+
+
+def test_wheel_install_is_usable_without_data_dir_override():
+    """DEC2=A：`devdisk` 必须能在没有任何仓库树的情况下自解析规则表。
+
+    `rules.resolve_data_dir()` 的查找顺序里必须包含**包内**数据目录，
+    否则 wheel 形态仍然只能靠 `DEVDISK_DATA_DIR` 环境变量（旧缺陷）。
+    """
+    import sys
+
+    sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+    from devdisk import rules
+
+    text = read_text(os.path.join(REPO_ROOT, "src", "devdisk", "rules.py"))
+    assert "bundled_data_dir" in text, "resolve_data_dir 未包含包内数据目录这一层"
+    assert hasattr(rules, "bundled_data_dir"), "包内数据目录的定位函数必须存在"
+
+    # 顺序守门：包内数据目录必须在"当前目录向上查找"之前被尝试，
+    # 否则 wheel 形态在仓库树外的 CWD 仍然只能靠 DEVDISK_DATA_DIR。
+    body = text.split("def resolve_data_dir", 1)[1]
+    assert body.index("bundled_data_dir()") < body.index("os.getcwd()")
+
+    # 独立于 CWD：把 CWD 换到中立目录后解析仍须成功（editable 安装下指向源码树）。
+    # 注意 Windows 不允许删除进程的当前目录，退出前必须先切回。
+    import tempfile
+
+    previous = os.getcwd()
+    neutral = tempfile.mkdtemp(prefix="dd-neutral-")
+    try:
+        os.chdir(neutral)
+        resolved = rules.resolve_data_dir()
+    finally:
+        os.chdir(previous)
+        import shutil
+
+        shutil.rmtree(neutral, ignore_errors=True)
+    assert os.path.isfile(os.path.join(resolved, "rules", "types.json"))
+
 
 
 def test_no_absolute_local_paths_in_tracked_docs():
@@ -302,12 +408,42 @@ def test_truth_files_never_contain_observed_fields():
 def test_tools_scripts_are_executable_entrypoints():
     """tools/ 下的脚本必须能被 `py tools/x.py --help` 调用（无 import 期副作用）。"""
     for name in ("gen_synth_tree.py", "bench_scan.py", "bench_grade.py",
-                 "reference_grade.py", "bench_audit.py", "bench_clean.py"):
+                 "reference_grade.py", "bench_audit.py", "bench_clean.py",
+                 "check_release.py"):
         path = os.path.join(TOOLS_ROOT, name)
         assert os.path.isfile(path), name
         text = read_text(path)
         assert "def main(" in text
         assert '__name__ == "__main__"' in text
+
+
+def test_check_release_has_falsifiable_probes():
+    """DEC5=B：发布门必须自带探针，否则"门本身没被验证过"。
+
+    判据是性质不是痕迹：探针表里必须有**至少 8 组**变异，且每组都有自己的检查项码，
+    并且 `--probe` 的返回码由"未命中数"决定（不是恒 0）。
+    """
+    text = read_text(os.path.join(TOOLS_ROOT, "check_release.py"))
+    probes = re.findall(r'probe\("([a-z0-9_]+)",\s*"([A-Z_]+)"', text)
+    assert len(probes) >= 8, probes
+    codes = {code for _, code in probes}
+    assert len(codes) >= 8, codes
+    names = {name for name, _ in probes}
+    assert len(names) >= 8, names
+    assert "return 0 if failures == 0 else 1" in text
+
+
+def test_check_release_never_weakens_to_text_only_checks():
+    """本仓纪律（提示词第三/四节）：门要**真跑**，不能把已有 pytest/bench 抄成读文本。
+
+    因此发布门必须真构建包形态（真读 zip/tar 内容）并真做 git archive 同源比对。
+    """
+    text = read_text(os.path.join(TOOLS_ROOT, "check_release.py"))
+    for needle in ("zipfile.ZipFile(", "tarfile.open(", '"git", "-C", repo, "archive"',
+                   "build_sdist", "build_wheel", "sha256_file("):
+        assert needle in text, needle
+    # 包形态必须读容器内容（真构建产物），而不是断言"某文件里出现过某串字"。
+    assert "_tree_digest(" in text
 
 
 # ------------------------------------------------------------------ M3 数据守门
