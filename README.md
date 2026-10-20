@@ -7,13 +7,16 @@
 删除动作默认不执行；执行时移动到隔离区并写 manifest，可一键撤销。
 
 - 纯本地：无服务器、无数据库、无网络请求、无遥测
-- 零第三方运行时依赖：仅 Python 标准库（3.8+）
+- 零第三方运行时依赖：仅 Python 标准库（3.12+）
 - 默认只读：`scan` / `audit` / `report` 不修改被扫描目录
 - 永不 `rm -rf`：清理 = 移动到 `.trash/<batch-id>/`，`undo` 逐字节恢复
 - `.git` 只读：只统计体积与对象数，最多建议 `git gc`，从不执行
 
-**状态**：v0.1.0 已发布（M0–M6 全部完成）。发布留档见 `plan/RELEASE-M6.md`；
-CI 在 windows/ubuntu × Python 3.8/3.12 四矩阵上全绿。
+**状态**：**v0.1.0 已发布**（M0–M6 全部完成，发布留档见 `plan/RELEASE-M6.md`）；
+代码已推进到 **0.1.1**（规则表随包分发 + sdist 自足 + floor 3.12 + actions v7），
+**tag / Release 尚未创建**（需人工 2FA 执行）。发布终态由 `tools/check_release.py` 机械判定。
+CI 在 windows/ubuntu × Python 3.12 两矩阵上跑；
+已知的最后一次四矩阵全绿 run 是 `39104768719` / 2026-10-18T06:38:41Z（floor 抬到 3.12 之前）。
 `scan` 输出**扫描事实**（类型 / 体积 / mtime / 项目根 / 跳过原因）与**分级结论**
 （`grade` / `reason` / `evidence`，`totals.by_grade` 三级体积合计）；
 分级判定来自数据文件 `data/rules/grades.json`，引擎零硬编码规则。
@@ -48,23 +51,26 @@ CI 在 windows/ubuntu × Python 3.8/3.12 四矩阵上全绿。
 python -m venv .venv
 # Windows: .venv\Scripts\activate    Linux/macOS: source .venv/bin/activate
 
-# Python 3.8 自带的 pip 20.2.3 无法可编辑安装 pyproject-only 项目，先升级
 python -m pip install -U pip
-
 python -m pip install -e ".[dev]"
 ```
 
-要求 Python 3.8+。运行时不安装任何第三方库；`dev` 额外组只用于跑测试。
+要求 Python 3.12+（3.8/3.9/3.10 均已 EOL）。运行时不安装任何第三方库；`dev` 额外组只用于跑测试。
 
 ## 已知环境问题
 
-- **wheel / 非 editable 安装找不到规则表**：`data/rules/*.json` 是仓库内数据资产，不随 wheel 打包。
-  `pip install .`（非 editable）后从仓库外运行会报
-  `找不到 data/rules/types.json`（退出码 4）。首期发布物是**源码包 + editable 安装**，不受影响；
-  确实要用 wheel 时设置 `DEVDISK_DATA_DIR=<仓库>/data` 即可。本机实测两种形态都验过：
-  editable 安装从任意工作目录可跑，wheel 安装仅在设了该变量后可跑。
+- **发布物是手工源码包，不是 `python -m build` 的产物**：Release 附件 `devdisk-<版本>-src.tar.gz`
+  由 `git archive <tag>` 打出，与 tag 树逐文件一致。`python -m build --sdist` 出的包由 `MANIFEST.in`
+  收全 `data/rules`、`data/fixtures`、`tools/`、`plan/`（解包后可直接安装并复跑全部基准），
+  但**只有前者是发布形态**（带 SHA256 与 Release 页）。判据见
+  `tests/test_repo_discipline.py::test_sdist_manifest_collects_data_assets`。
+- **规则表随包分发（v0.1.1 起）**：`data/rules/*.json` 与 `data/fixtures/docker_system_df/*`
+  通过 `pyproject.toml` 的 `package-dir` 映射成包内 `devdisk.data`，随 wheel 一起安装。
+  `pip install`（非 editable）后**任意工作目录**都能直接跑 `devdisk scan`，不再需要设置环境变量。
+  `DEVDISK_DATA_DIR` 仍可用，作为**覆盖**入口（指向另一套规则表做实验时）；
+  指向错误路径会报"缺少 rules/types.json"并退出码 4。`devdisk selftest` 会一并校验包内规则表可加载。
 - **Python 3.8 建 venv 后先升级 pip**：3.8 自带 pip 20.2.3 对 pyproject-only 项目报
-  `editable mode currently requires a setup.py based build`；升级 pip 后正常。
+  `editable mode currently requires a setup.py based build`；升级 pip 后正常（v0.1.1 起 floor 已抬到 3.12）。
 - **Windows 上 `py` 启动器会绕过 venv**：`py -m pip install …` 装到系统 Python，
   激活 venv 后请用 `python -m pip …`。
 - **想确定性地验证"Docker 缺失"降级**：Windows 的 `docker.exe` 常登记在 `App Paths`
@@ -211,9 +217,16 @@ py -X utf8 tools/bench_report.py --tree devdisk-out/synth
 ## 开发与回归
 
 ```bash
-# 全量测试（两个解释器各跑一遍）
-py -3.8 -m pytest -q
-py -3.12 -m pytest -q
+# 建议在干净 venv 里跑（激活后用 python，别用 py 启动器）
+python -m pytest -q
+```
+
+包形态（sdist / wheel 都能装完即用）的复验命令：
+
+```bash
+python -m build --sdist --wheel
+tar -tzf dist/*.tar.gz | grep -c "data/rules"    # 期望 > 0（MANIFEST.in 收款）
+python -c "import zipfile,glob;z=zipfile.ZipFile(glob.glob('dist/*.whl')[0]);print(sum(1 for n in z.namelist() if '/data/' in n))"  # 期望 8
 ```
 
 数据与口径纪律见 `data/README.md`；计划文档见 `plan/00-README总览.md`。
