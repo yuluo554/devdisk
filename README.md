@@ -15,8 +15,9 @@
 **状态**：**v0.1.0 已发布**（M0–M6 全部完成，发布留档见 `plan/RELEASE-M6.md`）；
 代码已推进到 **0.1.1**（规则表随包分发 + sdist 自足 + floor 3.12 + actions v7），
 **tag / Release 尚未创建**（需人工 2FA 执行）。发布终态由 `tools/check_release.py` 机械判定。
-CI 在 windows/ubuntu × Python 3.12 两矩阵上跑；
-已知的最后一次四矩阵全绿 run 是 `39104768719` / 2026-10-18T06:38:41Z（floor 抬到 3.12 之前）。
+CI 在 windows/ubuntu × Python 3.12 两矩阵上全绿：
+run `39417493019` / 2026-10-20T11:47:38Z（ubuntu 腿实际镜像 `ubuntu-24.04`，windows 腿 `windows-2025-vs2026`），
+注解 **0 条 warning**（改前 4 条 `Node.js 20 is deprecated`），仅余 1 条 `ubuntu-latest` 迁移 notice。
 `scan` 输出**扫描事实**（类型 / 体积 / mtime / 项目根 / 跳过原因）与**分级结论**
 （`grade` / `reason` / `evidence`，`totals.by_grade` 三级体积合计）；
 分级判定来自数据文件 `data/rules/grades.json`，引擎零硬编码规则。

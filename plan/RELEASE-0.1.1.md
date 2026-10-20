@@ -39,7 +39,8 @@
 | 8 | 仓库内 `python -m pytest` | **258 passed**，exit 0 |
 | 9 | `devdisk --version` | `devdisk 0.1.1` |
 | 10 | `tools/check_release.py --probe` | **10 / 10** 命中期望变异，exit 0 |
-| 11 | 一次新 CI run（floor 3.12 两矩阵） | 全绿 + 注解 0 条（**待推送后由仓库主人触发**） |
+| 11 | 一次新 CI run（floor 3.12 两矩阵） | 全绿 + 注解 0 条 warning → **run `39417493019` / 2026-10-20T11:47:38Z**，两腿 success；注解仅 1 条 `ubuntu-latest` 迁移 notice（实测镜像仍为 `ubuntu-24.04`） |
+| 12 | PR 前一轮（`e11d7f0`）的 CI | run `39416872347`（push）/ `39416913468`（pull_request）两轮均两腿 success，wall 结论一致 |
 
 ## 三、发布动作（仓库主人执行；执行方不得代做）
 
@@ -78,10 +79,10 @@ python tools/check_release.py . --asset devdisk-0.1.1-src.tar.gz
 
 | 项 | 状态 | 原因 |
 |---|---|---|
-| Ubuntu 26（新 `ubuntu-latest`）上两矩阵是否绿 | **未验证** | 需推送触发 CI；本轮执行方不推远端 |
-| actions v7 是否让注解归零 | **未验证** | 同上；本地只做了 `yaml.safe_load` 校验 |
-| `v0.1.1` 的 tag 与 Release | **未创建** | 需仓库主人 2FA；纪律条款禁止执行方打 tag |
-| 附件与 tag 树同源 | **未验证（待 tag）** | tag 不存在，无从比对；`check_release.py --asset` 在 tag 后跑 |
+| actions v7 是否让注解归零 | **已验证** | run `39417493019`：4 条 `Node.js 20 is deprecated` → **0 条** |
+| Ubuntu 26（新 `ubuntu-latest`）上两矩阵是否绿 | **未验证真实 Ubuntu 26** | 2026-10-20 的 run 里 ubuntu 腿 `Image: ubuntu-24.04`（runner `20261012.334.1`）；那条 notice 只是迁移预告。下一次 `ubuntu-latest` 滚到 26 之后需重跑确认 |
+| `v0.1.1` 的 tag 与 Release | 见下方状态 | 需仓库主人 2FA |
+| 附件与 tag 树同源 | 见下方状态 | tag 建立后用 `check_release.py --asset` 判 |
 
 > 更正一处诊断口径：诊断报告 D2 标 P2，本轮按用户 DEC1 决策当作结构性主线处理（因为它决定
 > "走 sdist 渠道的人能否装完即用"）。严重性判断的改变来自用户决策，不是执行方的重新评估。
