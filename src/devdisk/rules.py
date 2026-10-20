@@ -57,10 +57,19 @@ class RulesError(Exception):
     """规则表缺失或格式错误。"""
 
 
+def bundled_data_dir():
+    """包内随包数据目录（wheel/sdist 安装形态下由 `pyproject.toml` 的 `package-dir` 映射而来）。
+
+    源码树里没有这个目录（`data/` 在仓库根），因此调用方必须先判断是否存在。
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+
 def resolve_data_dir():
     """定位 `data/` 目录。
 
-    查找顺序：环境变量 `DEVDISK_DATA_DIR` → 源码树向上查找 → 当前目录向上查找。
+    查找顺序：环境变量 `DEVDISK_DATA_DIR` → **包内**数据目录（wheel 形态） →
+    源码树向上查找 → 当前目录向上查找。
     找不到即报错，避免"用了另一套内置规则"这种不可审计的降级。
     """
     override = os.environ.get("DEVDISK_DATA_DIR")
@@ -70,6 +79,10 @@ def resolve_data_dir():
             return candidate
         raise RulesError("环境变量 DEVDISK_DATA_DIR 指向的目录缺少 rules/%s：%s"
                          % (TYPES_FILENAME, candidate))
+
+    bundled = bundled_data_dir()
+    if os.path.isfile(os.path.join(bundled, "rules", TYPES_FILENAME)):
+        return bundled
 
     starts = [os.path.dirname(os.path.abspath(__file__)), os.path.abspath(os.getcwd())]
     for start in starts:

@@ -40,12 +40,16 @@
 
 ### 二之一、仓库内数据资产登记（M1 起）
 
+> **复核锚**：`next_review: 2027-01-17`（本节资产来源与外部对标结论的**下次复核日**；
+> 与组合内其它仓同一口径。只作提醒，不改任何既有结论与数字）。
+> **基准日**：外部工具对标（npkill / kondo 等）为 2026-10-17，属"软论据"，见 `README.md` 定位表。
+
 | 资产 | 位置 | 来源 | 许可/状态 |
 |---|---|---|---|
-| 类型规则表 | `data/rules/types.json` | 本项目设计（目录名 + 项目标志文件），依据 `plan/01` 模块① 与 `plan/03` 模块① | 本项目原创，随源码包分发；JSON 自带 `source` 字段 |
+| 类型规则表 | `data/rules/types.json` | 本项目设计（目录名 + 项目标志文件），依据 `plan/01` 模块① 与 `plan/03` 模块① | 本项目原创，随源码包与 wheel 分发（v0.1.1 起）；JSON 自带 `source` 字段 |
 | 忽略规则表 | `data/rules/ignore.txt` | 本项目设计（自定最小语法：字面名 / `*` 前缀后缀 / `/` 锚定），**非** `.gitignore` 拷贝 | 同上 |
-| 分级规则表 | `data/rules/grades.json` | 本项目设计（等级顺序、类型范围、模式组、证据源、理由模板），依据 `plan/03` 模块② 与本节 §四 第 7/8 条 | 本项目原创，随源码包分发；JSON 自带 `source` 字段与显式 `order` |
-| Docker fixture | `data/fixtures/docker_system_df/*.txt` | 手写脱敏文本，按 Docker 官方 `docker system df` 输出形态（新版/旧版/空表/畸形）构造，不含真实镜像名或容器 ID | 本项目原创，随源码包分发；来源与换算口径见 `plan/04` §三 |
+| 分级规则表 | `data/rules/grades.json` | 本项目设计（等级顺序、类型范围、模式组、证据源、理由模板），依据 `plan/03` 模块② 与本节 §四 第 7/8 条 | 本项目原创，随源码包与 wheel 分发（v0.1.1 起）；JSON 自带 `source` 字段与显式 `order` |
+| Docker fixture | `data/fixtures/docker_system_df/*.txt` | 手写脱敏文本，按 Docker 官方 `docker system df` 输出形态（新版/旧版/空表/畸形）构造，不含真实镜像名或容器 ID | 本项目原创，随源码包与 wheel 分发（v0.1.1 起）；来源与换算口径见 `plan/04` §三 |
 | Docker fixture 真值 | `data/fixtures/docker_system_df/expect.json` | 逐列按 1024 进制手算，**不由解析器回填** | 本项目原创；`source` 字段说明换算口径 |
 
 > 三个规则表是类型 / 忽略 / 分级的**唯一来源**；缺失或格式错时运行期返回退出码 4，禁止静默回退到内置默认。

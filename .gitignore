@@ -70,6 +70,9 @@ desktop.ini
 _private/
 notes.local.md
 
+# 迭代交接物（诊断/执行记录，不入版本控制）
+update/
+
 # 日志
 *.log
 logs/

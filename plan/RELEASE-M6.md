@@ -51,9 +51,9 @@
 | 步骤 | 命令/判据 | 结果 |
 |---|---|---|
 | 1. 文件名扫描 | `git ls-files` 过滤 `.env$/.key$/secret/token` | 0 命中 |
-| 2. 内容级扫描 | 全部 65 个跟踪文件：本机绝对路径、`/home/<user>/`、邮箱、手机号、身份证、`sk-` 密钥、私钥头、内网 IP | 0 命中（唯一邮箱形态是本项目 GitHub noreply，属公开元数据） |
-| 2b. 历史级扫描 | 13 个提交、149 个唯一 blob 全量扫同一组模式（先做阳性对照：`devdisk` 命中 40 文件，证明扫描通道有效） | 0 命中 |
-| 2c. 提交信息扫描 | 全部 13 条提交消息主体扫同一组模式 | 0 命中 |
+| 2. 内容级扫描 | 全部跟踪文件（**截至 `2be9e15` 实测 67 个**；复算 `git ls-files | wc -l`）：本机绝对路径、`/home/<user>/`、邮箱、手机号、身份证、`sk-` 密钥、私钥头、内网 IP | 0 命中（唯一邮箱形态是本项目 GitHub noreply，属公开元数据） |
+| 2b. 历史级扫描 | **截至 `2be9e15` 实测 24 个提交**（复算 `git rev-list --count HEAD`）、149 个唯一 blob 全量扫同一组模式（先做阳性对照：`devdisk` 命中 40 文件，证明扫描通道有效） | 0 命中 |
+| 2c. 提交信息扫描 | 全部提交消息主体扫同一组模式（截至 `2be9e15` 为 24 条） | 0 命中 |
 | 3. 二进制扫描 | `git ls-files` 过滤 png/jpg/gif/ico/zip/gz/whl/exe/dll/pdf/docx/xlsx/pyc/so/dylib | 0 个跟踪二进制（仓库纯文本） |
 | 4. 产物扫描 | `git ls-files` 过滤 `devdisk-out/`、`reports/`、`.trash/`、`__pycache__`、`egg-info` | 0 命中（`.gitignore` 已覆盖，测试常驻断言） |
 | 5. 提交元数据邮箱 | `git log --format='%ae %ce' --all \| sort -u` | 仅 1 个唯一值，即 GitHub noreply（作者与提交者两字段均已核对） |

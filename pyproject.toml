@@ -1,21 +1,20 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "devdisk"
-version = "0.1.0"
+version = "0.1.1"
 description = "开发者磁盘占用审计与安全清理：分级可删清单 + 只读审计 + 可回滚隔离区 + 单文件中文 HTML 报告"
 readme = "README.md"
-requires-python = ">=3.8"
-license = { text = "MIT" }
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "yuluo554" }]
 keywords = ["disk", "cleanup", "node_modules", "docker", "git", "cli"]
 classifiers = [
     "Environment :: Console",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
@@ -29,10 +28,23 @@ dev = ["pytest>=7,<9"]
 devdisk = "devdisk.cli:main"
 
 [tool.setuptools]
-package-dir = { "" = "src" }
+package-dir = { "" = "src", "devdisk.data" = "data" }
+# 规则表与 fixture 是运行期必需数据（DEC2=A：`pip install` 后任意 CWD 都能跑）。
+# `data/` 仍是仓库内的唯一落点，这里只是把它**映射**成包内 `devdisk.data` 再打进 wheel；
+# 因为 `data/rules`、`data/fixtures/...` 目录名对 Python 而言是可导入包，
+# 必须逐层显式列入 `packages`，否则 setuptools 报 "Package would be ignored"。
+# 新增 data 子目录时要同步这里 —— `tests/test_repo_discipline.py` 有守门。
+packages = [
+    "devdisk",
+    "devdisk.audit",
+    "devdisk.data",
+    "devdisk.data.rules",
+    "devdisk.data.fixtures",
+    "devdisk.data.fixtures.docker_system_df",
+]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools.package-data]
+"devdisk.data" = ["rules/*", "fixtures/docker_system_df/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
